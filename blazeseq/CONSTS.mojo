@@ -11,7 +11,7 @@ alias quality_header = 43
 alias new_line = 10
 alias carriage_return = 13
 
-alias U8 = DType.uint8
+alias U8 = SIMD[DType.uint8, 1]
 alias simd_width: Int = simdwidthof[U8]()
 
 alias DEFAULT_CAPACITY = 64 * KB

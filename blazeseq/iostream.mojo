@@ -22,11 +22,11 @@ from utils.static_tuple import InlineArray
 
 
 trait reader:
-    fn read_bytes(inout self, amt: Int) raises -> Tensor[U8]:
+    fn read_bytes(inout self, amt: Int) raises -> List[U8]:
         ...
 
     fn read_to_buffer(
-        inout self, inout buf: Tensor[U8], buf_pos: Int, amt: Int
+        inout self, inout buf: List[U8], buf_pos: Int, amt: Int
     ) raises -> Int:
         ...
 
@@ -41,19 +41,19 @@ struct FileReader(reader):
         self.handle = open(path, "r")
 
     @always_inline
-    fn read_bytes(inout self, amt: Int = -1) raises -> Tensor[U8]:
+    fn read_bytes(inout self, amt: Int = -1) raises -> List[U8]:
         return self.handle.read_bytes(amt)
 
     # Does not work well currently
     @always_inline
     fn read_to_buffer(
-        inout self, inout buf: Tensor[U8], buf_pos: Int, amt: Int
+        inout self, inout buf: List[U8], buf_pos: Int, amt: Int
     ) raises -> Int:
         var out = self.read_bytes(amt)
-        if out.num_elements() == 0:
+        if len(out) == 0:
             return 0
-        cpy_tensor[U8](buf, out, out.num_elements(), buf_pos, 0)
-        return out.num_elements()
+        cpy_tensor[U8](buf, out, len(out), buf_pos, 0)
+        return len(out)
 
     fn __moveinit__(inout self, owned other: Self):
         self.handle = other.handle^
@@ -61,27 +61,27 @@ struct FileReader(reader):
 
 struct TensorReader(reader):
     var pos: Int
-    var source: Tensor[U8]
+    var source: List[U8]
 
-    fn __init__(inout self, source: Tensor[U8]):
+    fn __init__(inout self, source: List[U8]):
         self.source = source
         self.pos = 0
 
     @always_inline
-    fn read_bytes(inout self, amt: Int) raises -> Tensor[U8]:
-        var ele = min(amt, self.source.num_elements() - self.pos)
+    fn read_bytes(inout self, amt: Int) raises -> List[U8]:
+        var ele = min(amt, len(self.source) - self.pos)
 
         if ele == 0:
-            return Tensor[U8](0)
-        var out = Tensor[U8](ele)
-        cpy_tensor[U8](out, self.source, out.num_elements(), 0, self.pos)
-        self.pos += out.num_elements()
+            return List[U8](0)
+        var out = List[U8](ele)
+        cpy_tensor[U8](out, self.source, len(out)(), 0, self.pos)
+        self.pos += len(out)
         return out
 
     fn read_to_buffer(
-        inout self, inout buf: Tensor[U8], buf_pos: Int, amt: Int
+        inout self, inout buf: List[U8], buf_pos: Int, amt: Int
     ) raises -> Int:
-        var ele = min(amt, self.source.num_elements() - self.pos)
+        var ele = min(amt, len(self.source) - self.pos)
         if ele == 0:
             return 0
         cpy_tensor[U8](buf, self.source, ele, buf_pos, self.pos)
@@ -104,7 +104,7 @@ struct BufferedLineIterator[T: reader, check_ascii: Bool = False](
     """
 
     var source: FileReader
-    var buf: Tensor[U8]
+    var buf: List[U8]
     var head: Int
     var end: Int
     var consumed: Int
@@ -116,7 +116,7 @@ struct BufferedLineIterator[T: reader, check_ascii: Bool = False](
             self.source = FileReader(source)
         else:
             raise Error("Provided file not found for read")
-        self.buf = Tensor[U8](capacity)
+        self.buf = List[U8](capacity)
         self.head = 0
         self.end = 0
         self.consumed = 0
@@ -144,21 +144,22 @@ struct BufferedLineIterator[T: reader, check_ascii: Bool = False](
     #     self.consumed = 0  # Hack to make the initial buffer full non-consuming
 
     @always_inline
-    fn read_next_line(inout self) raises -> Tensor[U8]:
+    fn read_next_line(inout self) raises -> List[U8]:
         var line_coord = self._line_coord()
-        return slice_tensor[U8](self.buf, line_coord.start, line_coord.end)
+        return slice_tensor[U8](
+            self.buf, line_coord.start.value(), line_coord.end.value()
+        )
 
     @always_inline
     fn read_next_coord(inout self) raises -> Slice:
         var line_coord = self._line_coord()
         return slice(
-            line_coord.start + self.consumed, line_coord.end + self.consumed
+            line_coord.start.value() + self.consumed,
+            line_coord.end.value() + self.consumed,
         )
 
     @always_inline
-    fn read_n_coords[
-        lines: Int
-    ](inout self) raises -> List[Slice]:
+    fn read_n_coords[lines: Int](inout self) raises -> List[Slice]:
         return self._read_n_line[lines]()
 
     @always_inline
@@ -167,15 +168,15 @@ struct BufferedLineIterator[T: reader, check_ascii: Bool = False](
         self._left_shift()
         var nels = self.uninatialized_space()
         var in_buf = self.source.read_bytes(nels)
-        if in_buf.num_elements() == 0:
+        if len(in_buf)() == 0:
             raise Error("EOF")
 
-        if in_buf.num_elements() < nels:
-            self._resize_buf(in_buf.num_elements() - nels, MAX_CAPACITY)
+        if len(in_buf)() < nels:
+            self._resize_buf(len(in_buf)() - nels, MAX_CAPACITY)
 
-        self._store[self.check_ascii](in_buf, in_buf.num_elements())
+        self._store[self.check_ascii](in_buf, len(in_buf)())
         self.consumed += nels
-        return in_buf.num_elements()
+        return len(in_buf)()
 
     @always_inline
     fn _line_coord(inout self) raises -> Slice:
@@ -189,15 +190,15 @@ struct BufferedLineIterator[T: reader, check_ascii: Bool = False](
         coord = Slice(line_start, line_end)
 
         # Handle small buffers
-        if coord.end == -1 and self.head == 0:
+        if coord.end.value() == -1 and self.head == 0:
             for i in range(MAX_SHIFT):
-                if coord.end != -1:
+                if coord.end.value() != -1:
                     return self._handle_windows_sep(coord)
                 else:
                     coord = self._line_coord_missing_line()
 
         # Handle incomplete lines across two chunks
-        if coord.end == -1:
+        if coord.end.value() == -1:
             _ = self._fill_buffer()
             return self._handle_windows_sep(self._line_coord_incomplete_line())
 
@@ -222,7 +223,8 @@ struct BufferedLineIterator[T: reader, check_ascii: Bool = False](
                 # Resetting coordinates for read lines to the new buffer coordinates
                 for j in range(i):
                     coords[j] = Slice(
-                        coords[j].start - self.head, coords[j].end - self.head
+                        coords[j].start.value() - self.head,
+                        coords[j].end.value() - self.head,
                     )
                 _ = self._fill_buffer()  # self.head is reset to 0
 
@@ -233,22 +235,23 @@ struct BufferedLineIterator[T: reader, check_ascii: Bool = False](
             coord = Slice(line_start, line_end)
 
             # Handle small buffers
-            if coord.end == -1 and self.head == 0:
+            if coord.end.value() == -1 and self.head == 0:
                 for i in range(MAX_SHIFT):
-                    if coord.end != -1:
+                    if coord.end.value() != -1:
                         coords[i] = self._handle_windows_sep(coord)
                         continue
                     else:
                         coord = self._line_coord_missing_line(internal_head)
 
             # Handle incomplete lines across two chunks
-            if coord.end == -1:
+            if coord.end.value() == -1:
                 # Restting corrdinates to new buffer
                 internal_head -= self.head
                 line_start = internal_head
                 for j in range(i):
                     coords[j] = Slice(
-                        coords[j].start - self.head, coords[j].end - self.head
+                        coords[j].start.value() - self.head,
+                        coords[j].end.value() - self.head,
                     )
                 _ = self._fill_buffer()  # self.head is 0
 
@@ -257,7 +260,7 @@ struct BufferedLineIterator[T: reader, check_ascii: Bool = False](
                     internal_head
                 )
                 coords[i] = completet_line
-                line_end = completet_line.end
+                line_end = completet_line.end.value()
 
             internal_head = line_end + 1
 
@@ -308,7 +311,7 @@ struct BufferedLineIterator[T: reader, check_ascii: Bool = False](
     @always_inline
     fn _store[
         check_ascii: Bool = False
-    ](inout self, in_tensor: Tensor[U8], amt: Int) raises:
+    ](inout self, in_tensor: List[U8], amt: Int) raises:
         @parameter
         if check_ascii:
             self._check_ascii(in_tensor)
@@ -343,15 +346,15 @@ struct BufferedLineIterator[T: reader, check_ascii: Bool = False](
             nels = max_capacity
         else:
             nels = self.capacity() + amt
-        var x = Tensor[U8](nels)
+        var x = List[U8](nels)
         var nels_to_copy = min(self.capacity(), self.capacity() + amt)
         cpy_tensor[U8](x, self.buf, nels_to_copy, 0, 0)
         self.buf = x
 
     @always_inline
     @staticmethod
-    fn _check_ascii(in_tensor: Tensor[U8]) raises:
-        var aligned = math.align_down(in_tensor.num_elements(), simd_width)
+    fn _check_ascii(in_tensor: List[U8]) raises:
+        var aligned = math.align_down(len(in_tensor)(), simd_width)
         # alias bit_mask = 0xA0  # Between 32 and 127, makes a problems with 10
         alias bit_mask = 0x80  # Non negative
         for i in range(0, aligned, simd_width):
@@ -361,15 +364,15 @@ struct BufferedLineIterator[T: reader, check_ascii: Bool = False](
                 if mask[i] != 0:
                     raise Error("Non ASCII letters found")
 
-        for i in range(aligned, in_tensor.num_elements()):
+        for i in range(aligned, len(in_tensor)()):
             if in_tensor[i] & bit_mask != 0:
                 raise Error("Non ASCII letters found")
 
     @always_inline
     fn _handle_windows_sep(self, in_slice: Slice) -> Slice:
-        if self.buf[in_slice.end] != carriage_return:
+        if self.buf[in_slice.end.value()] != carriage_return:
             return in_slice
-        return Slice(in_slice.start, in_slice.end - 1)
+        return Slice(in_slice.start.value(), in_slice.end.value() - 1)
 
     ########################## Helpers functions, have no side effects #######################
 
@@ -383,7 +386,7 @@ struct BufferedLineIterator[T: reader, check_ascii: Bool = False](
 
     @always_inline
     fn capacity(self) -> Int:
-        return self.buf.num_elements()
+        return len(self.buf)
 
     @always_inline
     fn uninatialized_space(self) -> Int:
@@ -399,21 +402,25 @@ struct BufferedLineIterator[T: reader, check_ascii: Bool = False](
 
     @always_inline
     fn __str__(self) -> String:
-        var out = Tensor[U8](self.len())
+        var out = List[U8](self.len())
         cpy_tensor[U8](out, self.buf, self.len(), 0, self.head)
         return String(out._steal_ptr().bitcast[DType.uint8](), self.len())
 
-    fn __getitem__(self, index: Int) raises -> Scalar[U8]:
+    fn __getitem__(self, index: Int) raises -> U8:
         if self.head <= index <= self.end:
             return self.buf[index]
         else:
             raise Error("Out of bounds")
 
-    fn __getitem__(self, slice: Slice) raises -> Tensor[U8]:
-        if slice.start >= self.head and slice.end <= self.end:
-            var out = Tensor[U8](slice.end - slice.start)
+    fn __getitem__(self, slice: Slice) raises -> List[U8]:
+        if slice.start.value() >= self.head and slice.end.value() <= self.end:
+            var out = List[U8](slice.end.value() - slice.start.value())
             cpy_tensor[U8](
-                out, self.buf, slice.end - slice.start, 0, slice.start
+                out,
+                self.buf,
+                slice.end.value() - slice.start.value(),
+                0,
+                slice.start.value(),
             )
             return out
         else:
@@ -423,25 +430,25 @@ struct BufferedLineIterator[T: reader, check_ascii: Bool = False](
 # TODO: Add a resize if the buffer is too small
 struct BufferedWriter:
     var sink: FileHandle
-    var buf: Tensor[U8]
+    var buf: List[U8]
     var cursor: Int
     var written: Int
 
     fn __init__(inout self, out_path: String, buf_size: Int) raises:
         self.sink = open(out_path, "w")
-        self.buf = Tensor[U8](buf_size)
+        self.buf = List[U8](buf_size)
         self.cursor = 0
         self.written = 0
 
-    fn ingest(inout self, source: Tensor[U8]) raises -> Bool:
-        if source.num_elements() > self.uninatialized_space():
+    fn ingest(inout self, source: List[U8]) raises -> Bool:
+        if len(source)() > self.uninatialized_space():
             self.flush_buffer()
-        cpy_tensor[U8](self.buf, source, source.num_elements(), self.cursor, 0)
-        self.cursor += source.num_elements()
+        cpy_tensor[U8](self.buf, source, len(source)(), self.cursor, 0)
+        self.cursor += len(source)()
         return True
 
     fn flush_buffer(inout self) raises:
-        var out = Tensor[U8](self.cursor)
+        var out = List[U8](self.cursor)
         cpy_tensor[U8](out, self.buf, self.cursor, 0, 0)
         var out_string = StringRef(out._steal_ptr(), self.cursor)
         self.sink.write(out_string)
@@ -450,11 +457,11 @@ struct BufferedWriter:
 
     fn _resize_buf(inout self, amt: Int, max_capacity: Int = MAX_CAPACITY):
         var new_capacity = 0
-        if self.buf.num_elements() + amt > max_capacity:
+        if len(self.buf) + amt > max_capacity:
             new_capacity = max_capacity
         else:
-            new_capacity = self.buf.num_elements() + amt
-        var new_tensor = Tensor[U8](new_capacity)
+            new_capacity = len(self.buf) + amt
+        var new_tensor = List[U8](new_capacity)
         cpy_tensor[U8](new_tensor, self.buf, self.cursor, 0, 0)
         swap(self.buf, new_tensor)
 
@@ -462,7 +469,7 @@ struct BufferedWriter:
         return self.capacity() - self.cursor
 
     fn capacity(self) -> Int:
-        return self.buf.num_elements()
+        return len(self.buf)
 
     fn close(inout self) raises:
         self.flush_buffer()

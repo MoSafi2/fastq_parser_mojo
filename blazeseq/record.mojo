@@ -330,19 +330,19 @@ struct RecordCoord(Sized, Stringable, CollectionElement):
 
     @always_inline
     fn seq_len(self) -> Int32:
-        return self.SeqStr.end - self.SeqStr.start
+        return self.SeqStr.end.value() - self.SeqStr.start.value()
 
     @always_inline
     fn qu_len(self) -> Int32:
-        return self.QuStr.end - self.QuStr.start
+        return self.QuStr.end.value() - self.QuStr.start.value()
 
     @always_inline
     fn qu_header_len(self) -> Int32:
-        return self.QuHeader.end - self.QuHeader.start
+        return self.QuHeader.end.value() - self.QuHeader.start.value()
 
     @always_inline
     fn seq_header_len(self) -> Int32:
-        return self.SeqHeader.end - self.SeqHeader.start
+        return self.SeqHeader.end.value() - self.SeqHeader.start.value()
 
     fn __len__(self) -> Int:
         return int(self.seq_len())
@@ -350,19 +350,19 @@ struct RecordCoord(Sized, Stringable, CollectionElement):
     fn __str__(self) -> String:
         return (
             String("SeqHeader: ")
-            + str(self.SeqHeader.start)
+            + str(self.SeqHeader.start.value())
             + "..."
-            + str(self.SeqHeader.end)
+            + str(self.SeqHeader.end.value())
             + "\nSeqStr: "
-            + str(self.SeqStr.start)
+            + str(self.SeqStr.start.value())
             + "..."
-            + str(self.SeqStr.end)
+            + str(self.SeqStr.end.value())
             + "\nQuHeader: "
-            + str(self.QuHeader.start)
+            + str(self.QuHeader.start.value())
             + "..."
-            + str(self.QuHeader.end)
+            + str(self.QuHeader.end.value())
             + "\nQuStr: "
-            + str(self.QuStr.start)
+            + str(self.QuStr.start.value())
             + "..."
-            + str(self.QuStr.end)
+            + str(self.QuStr.end.value())
         )
