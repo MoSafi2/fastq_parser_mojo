@@ -168,7 +168,7 @@ struct BufferedLineIterator[T: reader, check_ascii: Bool = False](
         self._left_shift()
         var nels = self.uninatialized_space()
         var in_buf = self.source.read_bytes(nels)
-        if len(in_buf)() == 0:
+        if len(in_buf) == 0:
             raise Error("EOF")
 
         if len(in_buf)() < nels:
