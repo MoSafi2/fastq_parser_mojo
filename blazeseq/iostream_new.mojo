@@ -9,7 +9,8 @@ from blazeseq.helpers_new import find_chr_next_occurance
 
 alias carriage_return = 13
 alias U8 = UInt8
-alias MAX_CAPACITY = 64 * 1024
+alias MAX_CAPACITY = 128 * 1024
+alias MAX_SHIFT = 30
 
 struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
     var buf: List[UInt8]
@@ -35,7 +36,11 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
     fn _fill_buffer(inout self) raises -> Int:
         self._left_shift()
         var nels = self.uninatialized_space()
-        self._store(nels)
+        self.buf = self.source.read_bytes(nels)
+
+        if len(self.buf) == 0:
+            raise Error("EOF")
+        self.end += nels
         return len(self)
 
     fn _store[check_ascii: Bool = False](inout self, amt: Int) raises:
@@ -74,10 +79,27 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
 
         coord = Slice(line_start, line_end)
 
+        # Handle small buffers
+        if coord.end.value() == -1 and self.head == 0:
+            for i in range(MAX_SHIFT):
+                if coord.end.value() != -1:
+                    return self._handle_windows_sep(coord)
+                else:
+                    coord = self._line_coord_missing_line()
+
+        
+        # Handle incomplete lines across two chunks
+        if coord.end.value() == -1:
+            _ = self._fill_buffer()
+            return self._handle_windows_sep(self._line_coord_incomplete_line())
+
         self.head = line_end + 1
+        # Handling Windows-syle line seperator
+        if self.buf[line_end] == carriage_return:
+            line_end -= 1
+        return slice(line_start, line_end)
 
-        return coord
-
+    
     fn _line_coord_incomplete_line(inout self) raises -> Slice:
         if self._check_buf_state():
             _ = self._fill_buffer()
@@ -118,6 +140,13 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
         self.buf = x
 
 
+    
+    @always_inline
+    fn _handle_windows_sep(self, in_slice: Slice) -> Slice:
+        if self.buf[in_slice.end.value()] != carriage_return:
+            return in_slice
+        return Slice(in_slice.start.value(), in_slice.end.value() - 1)
+
     fn usable_space(self) -> Int:
         return self.uninatialized_space() + self.head
 
@@ -143,6 +172,12 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
 
 
 fn main() raises:
-    var b = BufferedLineIterator(Path("data/fastqc_data.txt"))
+    var b = BufferedLineIterator(Path("data/TESTX_H7YRLADXX_S1_L001_R1_001.fastq"))
+    var n = 0
     while True:
-            print(b._line_coord())
+        try:
+            _ = b._line_coord()
+            n += 1
+        except:
+            break
+    print(n)
