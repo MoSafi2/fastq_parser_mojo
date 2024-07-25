@@ -7,6 +7,10 @@ from sys import external_call
 from blazeseq.helpers_new import find_chr_next_occurance
 
 
+alias carriage_return = 13
+alias U8 = UInt8
+alias MAX_CAPACITY = 64 * 1024
+
 struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
     var buf: List[UInt8]
     var source: FileHandle
@@ -74,8 +78,45 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
 
         return coord
 
-    fn _line_coord_incomplete_line(inout self):
-        pass
+    fn _line_coord_incomplete_line(inout self) raises -> Slice:
+        if self._check_buf_state():
+            _ = self._fill_buffer()
+        var line_start = self.head
+        var line_end = find_chr_next_occurance(self.buf, self.head)
+        self.head = line_end + 1
+
+        if self.buf[line_end] == carriage_return:
+            line_end -= 1
+        return slice(line_start, line_end)
+
+    
+    @always_inline
+    fn _line_coord_missing_line(inout self) raises -> Slice:
+        self._resize_buf(self.get_capacity(), MAX_CAPACITY)
+        _ = self._fill_buffer()
+        var line_start = self.head
+        var line_end = find_chr_next_occurance(self.buf, self.head)
+        self.head = line_end + 1
+
+        return slice(line_start, line_end)
+    
+
+    @always_inline
+    fn _resize_buf(inout self, amt: Int, max_capacity: Int) raises:
+        if self.get_capacity() == max_capacity:
+            raise Error("Buffer is at max capacity")
+
+        var nels: Int
+        if self.get_capacity() + amt > max_capacity:
+            nels = max_capacity
+        else:
+            nels = self.get_capacity() + amt
+        var x = List[U8](nels)
+        var nels_to_copy = min(self.get_capacity(), self.get_capacity() + amt)
+        for i in range(nels_to_copy):
+            x[i] = self.buf[i]
+        self.buf = x
+
 
     fn usable_space(self) -> Int:
         return self.uninatialized_space() + self.head
@@ -103,4 +144,5 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
 
 fn main() raises:
     var b = BufferedLineIterator(Path("data/fastqc_data.txt"))
-    print(b._line_coord())
+    while True:
+            print(b._line_coord())
