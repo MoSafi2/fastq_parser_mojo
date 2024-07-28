@@ -40,6 +40,10 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
     fn _fill_buffer_init(inout self) raises -> Int:
         var nels = self.uninatialized_space()
         var intermediate = self.source.read_bytes(nels)
+
+        if len(intermediate) == 0:
+            raise Error("EOF")
+
         memcpy(
             dest=self.buf.unsafe_ptr(),
             src=intermediate.unsafe_ptr(),
@@ -47,8 +51,6 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
         )
         self.buf.size = len(intermediate)
 
-        if len(self.buf) == 0:
-            raise Error("EOF")
 
         self.end += len(intermediate)
         return len(intermediate)
@@ -58,11 +60,13 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
         var nels = self.uninatialized_space()
 
         var inter = self.source.read_bytes(nels)
+
+        if len(inter) == 0:
+            raise Error("EOF")
+
         var b = self.buf[self.head : self.end]
         b.extend(inter)
         self.buf = b
-        if len(self.buf) == 0:
-            raise Error("EOF")
         self.end += nels
         return len(self)
 
@@ -114,7 +118,8 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
         # Handling Windows-syle line seperator
         if self.buf[line_end] == carriage_return:
             line_end -= 1
-        return slice(line_start, line_end)
+        var s = slice(line_start, line_end)
+        return s
 
     fn _line_coord_incomplete_line(inout self) raises -> Slice:
         if self._check_buf_state():
@@ -125,7 +130,8 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
 
         if self.buf[line_end] == carriage_return:
             line_end -= 1
-        return slice(line_start, line_end)
+        var s = slice(line_start, line_end)
+        return s
 
     @always_inline
     fn _line_coord_missing_line(inout self) raises -> Slice:
@@ -134,11 +140,12 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
         var line_start = self.head
         var line_end = find_chr_next_occurance(self.buf, self.head)
         self.head = line_end + 1
-
-        return slice(line_start, line_end)
+        var s = slice(line_start, line_end)
+        return s
 
     @always_inline
     fn _resize_buf(inout self, amt: Int, max_capacity: Int) raises:
+        print("Resizing buffer")
         if self.get_capacity() == max_capacity:
             raise Error("Buffer is at max capacity")
 
@@ -158,7 +165,7 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
         self.buf = x
         self.capacity = nels
 
-    # TODO: Make this functional in the end 
+    # TODO: Make this functional in the end
     @always_inline
     fn _handle_windows_sep(self, in_slice: Slice) -> Slice:
         return in_slice
