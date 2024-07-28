@@ -12,6 +12,7 @@ alias U8 = UInt8
 alias MAX_CAPACITY = 128 * 1024
 alias MAX_SHIFT = 30
 
+
 struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
     var buf: List[UInt8]
     var source: FileHandle
@@ -27,31 +28,48 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
         else:
             raise Error("Provided file not found for read")
 
-        self.buf = List[UInt8]()
+        # Initialize the buffer list
+        self.buf = List[UInt8](capacity=capacity)
+        memset_zero(self.buf.unsafe_ptr(), capacity)
+
         self.head = 0
         self.end = 0
         self.capacity = capacity
-        _ = self._fill_buffer()
+        _ = self._fill_buffer_init()
+
+    fn _fill_buffer_init(inout self) raises -> Int:
+        var nels = self.uninatialized_space()
+        var intermediate = self.source.read_bytes(nels)
+        memcpy(
+            dest=self.buf.unsafe_ptr(),
+            src=intermediate.unsafe_ptr(),
+            count=len(intermediate),
+        )
+        self.buf.size = len(intermediate)
+
+        if len(self.buf) == 0:
+            raise Error("EOF")
+
+        self.end += len(intermediate)
+        return len(intermediate)
 
     fn _fill_buffer(inout self) raises -> Int:
         self._left_shift()
         var nels = self.uninatialized_space()
-        self.buf = self.source.read_bytes(nels)
 
+        var inter = self.source.read_bytes(nels)
+        var b = self.buf[self.head : self.end]
+        b.extend(inter)
+        self.buf = b
         if len(self.buf) == 0:
             raise Error("EOF")
         self.end += nels
         return len(self)
 
-    fn _store[check_ascii: Bool = False](inout self, amt: Int) raises:
-        """Calls the source to read n bytes."""
-        self.buf = self.source.read_bytes(amt)
-        self.end += amt
-
     fn _left_shift(inout self):
         if self.head == 0:
             return
-        var no_items = len(self)
+        var no_items = self.end - self.head
         memcpy(
             self.buf.unsafe_ptr(), self.buf.unsafe_ptr() + self.head, no_items
         )
@@ -87,7 +105,6 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
                 else:
                     coord = self._line_coord_missing_line()
 
-        
         # Handle incomplete lines across two chunks
         if coord.end.value() == -1:
             _ = self._fill_buffer()
@@ -99,7 +116,6 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
             line_end -= 1
         return slice(line_start, line_end)
 
-    
     fn _line_coord_incomplete_line(inout self) raises -> Slice:
         if self._check_buf_state():
             _ = self._fill_buffer()
@@ -111,7 +127,6 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
             line_end -= 1
         return slice(line_start, line_end)
 
-    
     @always_inline
     fn _line_coord_missing_line(inout self) raises -> Slice:
         self._resize_buf(self.get_capacity(), MAX_CAPACITY)
@@ -121,7 +136,6 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
         self.head = line_end + 1
 
         return slice(line_start, line_end)
-    
 
     @always_inline
     fn _resize_buf(inout self, amt: Int, max_capacity: Int) raises:
@@ -133,22 +147,24 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
             nels = max_capacity
         else:
             nels = self.get_capacity() + amt
-        var x = List[U8](nels)
+        var x = List[U8](capacity=nels)
+
+        memset_zero(x.unsafe_ptr(), nels)
+        x.size = nels
+
         var nels_to_copy = min(self.get_capacity(), self.get_capacity() + amt)
         for i in range(nels_to_copy):
             x[i] = self.buf[i]
         self.buf = x
+        self.capacity = nels
 
-
-    
+    # TODO: Make this functional in the end 
     @always_inline
     fn _handle_windows_sep(self, in_slice: Slice) -> Slice:
-        if self.buf[in_slice.end.value()] != carriage_return:
-            return in_slice
-        return Slice(in_slice.start.value(), in_slice.end.value() - 1)
-
-    fn usable_space(self) -> Int:
-        return self.uninatialized_space() + self.head
+        return in_slice
+        # if self.buf[in_slice.end.value()] != carriage_return:
+        #     return in_slice
+        # return Slice(in_slice.start.value(), in_slice.end.value() - 1)
 
     fn uninatialized_space(self) -> Int:
         return self.get_capacity() - self.end
@@ -160,24 +176,31 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
         return self.end - self.head
 
     fn __str__(self) -> String:
-        return ""
+        return String(self.buf + List[UInt8](0))
 
-    fn __getitem__[
-        width: Int = 1
-    ](self, index: Int) -> SIMD[DType.uint8, width]:
-        if self.head <= index <= self.end:
-            return SIMD[DType.uint8, width](index)
-        else:
-            return SIMD[DType.uint8, size=width](0)
+    # fn __getitem__[
+    #     width: Int = 1
+    # ](self, index: Int) -> SIMD[DType.uint8, width]:
+    #     if self.head <= index <= self.end:
+    #         return SIMD[DType.uint8, width](index)
+    #     else:
+    #         return SIMD[DType.uint8, size=width](0)
 
 
 fn main() raises:
-    var b = BufferedLineIterator(Path("data/TESTX_H7YRLADXX_S1_L001_R1_001.fastq"))
+    var b = BufferedLineIterator(
+        Path("/home/mohamed/Documents/Projects/BlazeSeq/data/fastq_test.fastq"),
+        capacity=100,
+    )
     var n = 0
     while True:
         try:
-            _ = b._line_coord()
+            var s = b._line_coord()
             n += 1
+            print(String(b.buf[s.start : s.end.take() + 1]))
         except:
+            print(b.head, b.end)
+            print(String(b.buf))
             break
     print(n)
+    print(n / 4)
