@@ -51,7 +51,6 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
         )
         self.buf.size = len(intermediate)
 
-
         self.end += len(intermediate)
         return len(intermediate)
 
@@ -90,6 +89,7 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
 
     @always_inline
     fn _line_coord(inout self) raises -> Slice:
+        # Normal state
         if self._check_buf_state():
             _ = self._fill_buffer()
 
@@ -111,10 +111,12 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
 
         # Handle incomplete lines across two chunks
         if coord.end.value() == -1:
+            print("incomplete lines across two chunks")
             _ = self._fill_buffer()
             return self._handle_windows_sep(self._line_coord_incomplete_line())
 
         self.head = line_end + 1
+
         # Handling Windows-syle line seperator
         if self.buf[line_end] == carriage_return:
             line_end -= 1
@@ -128,8 +130,9 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
         var line_end = find_chr_next_occurance(self.buf, self.head)
         self.head = line_end + 1
 
-        if self.buf[line_end] == carriage_return:
-            line_end -= 1
+        # if self.buf[line_end] == carriage_return:
+        #     line_end -= 1
+
         var s = slice(line_start, line_end)
         return s
 
@@ -195,19 +198,18 @@ struct BufferedLineIterator[check_ascii: Bool = False](Sized, Stringable):
 
 
 fn main() raises:
+    from pathlib import Path
+
     var b = BufferedLineIterator(
-        Path("/home/mohamed/Documents/Projects/BlazeSeq/data/fastq_test.fastq"),
-        capacity=100,
+        Path(
+            "/home/mohamed/Documents/Projects/BlazeSeq/data/M_abscessus_HiSeq.fq"
+        ),
+        64,
     )
-    var n = 0
-    while True:
-        try:
-            var s = b._line_coord()
-            n += 1
-            print(String(b.buf[s.start : s.end.take() + 1]))
-        except:
-            print(b.head, b.end)
-            print(String(b.buf))
-            break
-    print(n)
-    print(n / 4)
+    for i in range(200):
+        var s = b._line_coord()
+        print(
+            s.__repr__(),
+            String(b.buf[s.start : s.end.take() + 1]),
+            b.buf[s].__str__(),
+        )
