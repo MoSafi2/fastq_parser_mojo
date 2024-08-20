@@ -1,7 +1,7 @@
 from blazeseq.CONSTS import DEFAULT_CAPACITY
 from pathlib import Path
 from buffer import Buffer
-from memory import memcpy
+from memory import memcpy, memset_zero
 from builtin.file import _OwnedStringRef
 from sys import external_call
 from blazeseq.helpers_new import find_chr_next_occurance

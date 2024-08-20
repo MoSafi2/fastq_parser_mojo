@@ -120,7 +120,7 @@ struct CoordParser:
         var coords = self.stream.read_n_coords[4]()
         var n = 0
         if self.stream.buf[coords[0].start.value()] != read_header:
-            print(coords[n], StringRef(self.stream.buf._ptr + coords[n].start.value(), coords[n].end.value() - coords[n].start.value()))
+            print(coords[n], StringRef(self.stream.buf.unsafe_ptr() + coords[n].start.value(), coords[n].end.value() - coords[n].start.value()))
             raise Error("Sequence Header is corrupt")
 
         if self.stream.buf[coords[2].start.value()] != quality_header:

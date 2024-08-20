@@ -1,5 +1,5 @@
 from math import align_down
-
+from sys.info import sizeof
 
 alias width = sizeof[DType.uint8]()
 
@@ -16,7 +16,8 @@ fn find_chr_next_occurance[T: DType](buffer: List[Scalar[T]], start: UInt, chr: 
     var aligned = start + align_down(length, width)
 
     for s in range(start, aligned, width):
-        var v = SIMD[T, width].load(buffer.unsafe_ptr(), offset = s)
+        var v = buffer.unsafe_ptr().load[width = width](s)
+        #var v = SIMD[T, width].load(buffer.unsafe_ptr(), offset = s)
         var mask = v == chr
         if mask.reduce_or():
             return s + arg_true(mask)
