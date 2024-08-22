@@ -6,6 +6,7 @@ from builtin.file import _OwnedStringRef
 from sys import external_call
 from blazeseq.helpers_new import find_chr_next_occurance
 from utils.span import Span
+from buffer import Buffer
 
 alias carriage_return = 13
 alias U8 = UInt8
@@ -138,10 +139,11 @@ struct BufferedReader(Sized):
     fn _left_shift(inout self):
         """Shift the remaining elements of the buffer to the left to remove the consumed data.
         """
+
         if self.head == 0:
             return
         var no_items = self.end - self.head
-        memcpy(self.buf, self.buf + self.head, no_items)
+        memcpy(self.buf, self.buf + self.head, self.len())
         self.head = 0
         self.end = no_items
 
@@ -150,16 +152,18 @@ struct BufferedReader(Sized):
         """Fill the buffer with data from the source. If the buffer is not empty, left shift the buffer to make space for new data.
         returns: the new length of the buffer.
         """
+
         if self._check_buf_state():
             self._reset_buffer()
         else:
             self._left_shift()
 
         var nels = self.uninatialized_space()
-        var nels_read = self.source.read(self.buf, nels)
+        var nels_read = self.source.read(self.buf + self.end, nels)
         if nels_read == 0:
             raise Error("EOF")
         self.end += int(nels_read)
+
         return self.len()
 
     @always_inline
@@ -184,9 +188,13 @@ struct BufferedReader(Sized):
         self.buf = new_buf
         self.capacity = nels
 
-    fn _skip_delim(inout self):
+    fn _skip_delim(inout self) raises:
         """Skips one byte of the buffer."""
         self.head += 1
+
+        if self._check_buf_state():
+            self._reset_buffer()
+            _ = self._fill_buffer()
 
     ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
     ###--------------------------------------------------------------  Public methods with side effect--------------------------------------------------------------------------------------------------------------###
@@ -200,9 +208,9 @@ struct BufferedReader(Sized):
             self._reset_buffer()
             _ = self._fill_buffer()
 
-        var nels = min(n, self.len())
+        var nels = n
         var data = List[UInt8](capacity=nels)
-        data.size = nels
+        data.size = min(nels, self.len())
         memcpy(data.unsafe_ptr(), self.buf + self.head, nels)
         self.head += nels
         return data
@@ -220,6 +228,17 @@ struct BufferedReader(Sized):
         var data = Span[
             is_mutable=False, T=UInt8, lifetime = __lifetime_of(self)
         ](unsafe_ptr=self.buf + self.head, len=nels)
+        self.head += nels
+        return data
+
+    fn read_buffer(inout self, n: Int) raises -> Buffer[DType.uint8]:
+        """Read n bytes from the buffer."""
+        if self._check_buf_state():
+            self._reset_buffer()
+            _ = self._fill_buffer()
+
+        var nels = n
+        var data = Buffer[DType.uint8](self.buf + self.head, nels)
         self.head += nels
         return data
 
@@ -285,6 +304,8 @@ struct BufferedLineIterator:
     fn __setitem__(self, idx: Int, value: UInt8):
         self.inner[idx] = value
 
+    # TODO: Handle small buffers as well
+    @always_inline
     fn read_line(inout self) raises -> List[UInt8]:
         var idx = find_chr_next_occurance(
             self.inner.buf, self.inner.len(), self.inner.head
@@ -293,18 +314,55 @@ struct BufferedLineIterator:
         # Handles broken lines across two chunks
         if idx == -1:
             _ = self.inner._fill_buffer()
-            return self.read_line()
+            idx = find_chr_next_occurance(
+                self.inner.buf, self.inner.len(), self.inner.head
+            )
 
-        # # Handle small buffer size
-        # if idx == -1:
-        #     for i in range(MAX_SHIFT):
-        #         self.inner._resize_buf(self.inner.get_capacity(), MAX_CAPACITY)
-        #         _ = self.inner._fill_buffer()
-        #         return self.read_line()
-
-        var res = self.inner.read_span(idx - self.inner.head)
+        var res = self.inner.read(idx - self.inner.head)
         self.inner._skip_delim()
         return res
+
+    # @always_inline
+    # fn read_line_span(
+    #     inout self,
+    # ) raises -> Span[is_mutable=False, T=UInt8, lifetime = __lifetime_of(self)]:
+    #     var idx = find_chr_next_occurance(
+    #         self.inner.buf, self.inner.len(), self.inner.head
+    #     )
+
+    #     # Handles broken lines across two chunks
+    #     if idx == -1:
+    #         _ = self.inner._fill_buffer()
+    #         idx = find_chr_next_occurance(
+    #             self.inner.buf, self.inner.len(), self.inner.head
+    #         )
+
+    #     var res = self.inner.read_span(idx - self.inner.head)
+    #     self.inner._skip_delim()
+    #     return res
+
+    @always_inline
+    fn read_line_span(
+        inout self,
+    ) raises -> Buffer[DType.uint8]:
+        var idx = find_chr_next_occurance(
+            self.inner.buf, self.inner.len(), self.inner.head
+        )
+
+        # Handles broken lines across two chunks
+        if idx == -1:
+            _ = self.inner._fill_buffer()
+            idx = find_chr_next_occurance(
+                self.inner.buf, self.inner.len(), self.inner.head
+            )
+
+        var res = self.inner.read_buffer(idx - self.inner.head)
+        self.inner._skip_delim()
+        return res
+
+    ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
+    ###-------------------------------------------------------------------------  read_line_diff_impl --------------------------------------------------------------------------------------------------------------###
+    ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
 
 
 fn main() raises:
@@ -319,9 +377,14 @@ fn main() raises:
     var n = 0
     while True:
         try:
-            var x = b.read_line()
-            n += len(x)
+            var x = b.read_line_span()
+            # print(String(x))
+            n += 1
+            # x.append(0)
+            # print(String(x), b.inner.head, b.inner.end)
+
         except Error:
+            print(Error._message())
             break
     print(n / 4)
 
