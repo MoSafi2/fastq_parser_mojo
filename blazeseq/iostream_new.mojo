@@ -13,7 +13,7 @@ alias MAX_CAPACITY = 128 * 1024
 alias MAX_SHIFT = 30
 
 
-struct BufferedReader[check_ascii: Bool = False](Sized):
+struct BufferedReader(Sized):
     var buf: UnsafePointer[UInt8]
     var source: FileHandle
     var head: Int
@@ -42,11 +42,38 @@ struct BufferedReader[check_ascii: Bool = False](Sized):
 
         _ = self._fill_buffer_init()
 
-    # TODO: Add the slice version of this
     @always_inline
     fn __getitem__(self, idx: Int) -> UInt8:
         """Get a single  value at the given index."""
         return self.buf.load(idx)
+
+    # From the mojo implementation for list,
+    @always_inline
+    fn __getitem__(self, span: Slice) -> List[UInt8]:
+        """Gets the sequence of elements at the specified positions.
+
+        Args:
+            span: A slice that specifies positions of the new list.
+
+        Returns:
+            A new list containing the list at the specified span.
+        """
+
+        var start: Int
+        var end: Int
+        var step: Int
+
+        # Slice bound checking is done here
+        start, end, step = span.indices(len(self))
+        var r = range(start, end, step)
+
+        if not len(r):
+            return List[UInt8]()
+
+        var res = List[UInt8](capacity=len(r))
+        memcpy(res.unsafe_ptr(), self.buf + start, len(r))
+        res.size = len(r)
+        return res
 
     # TODO: Add the slice version of this
     @always_inline
@@ -157,6 +184,10 @@ struct BufferedReader[check_ascii: Bool = False](Sized):
         self.buf = new_buf
         self.capacity = nels
 
+    fn _skip_delim(inout self):
+        """Skips one byte of the buffer."""
+        self.head += 1
+
     ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
     ###--------------------------------------------------------------  Public methods with side effect--------------------------------------------------------------------------------------------------------------###
     ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
@@ -192,98 +223,116 @@ struct BufferedReader[check_ascii: Bool = False](Sized):
         self.head += nels
         return data
 
-    # # TODO: Make this functional in the end
-    # @always_inline
-    # fn _handle_windows_sep(self, in_slice: Slice) -> Slice:
-    #     return in_slice
-    #     # if self.buf[in_slice.end.value()] != carriage_return:
-    #     #     return in_slice
-    #     # return Slice(in_slice.start.value(), in_slice.end.value() - 1)
+    @always_inline
+    fn robust_read(inout self, n: Int) raises -> List[UInt8]:
+        """Read n bytes from the buffer, if the number of bytes requested is greater than the buffer size, the buffer is resized to accommodate the new data.
+        """
 
-    # fn __getitem__[
-    #     width: Int = 1
-    # ](self, index: Int) -> SIMD[DType.uint8, width]:
-    #     if self.head <= index <= self.end:
-    #         return SIMD[DType.uint8, width](index)
-    #     else:
-    #         return SIMD[DType.uint8, size=width](0)
+        if n > self.get_capacity():
+            self._resize_buf(n, max(self.capacity, n - self.capacity))
+            _ = self._fill_buffer()
 
-    # @always_inline
-    # fn _line_coord(inout self) raises -> Slice:
-    #     # Normal state
-    #     if self._check_buf_state():
-    #         _ = self._fill_buffer()
+        var nels = min(n, self.len())
+        var data = List[UInt8](capacity=nels)
+        data.size = nels
+        memcpy(data.unsafe_ptr(), self.buf + self.head, nels)
+        self.head += nels
+        return data
 
-    #     var coord: Slice
-    #     var line_start = self.head
-    #     var line_end = find_chr_next_occurance[DType.uint8](
-    #         self.buf, start=self.head
-    #     )
+    @always_inline
+    fn robust_read_span(
+        inout self, n: Int
+    ) raises -> Span[is_mutable=False, T=UInt8, lifetime = __lifetime_of(self)]:
+        """Read n bytes from the buffer, if the number of bytes requested is greater than the buffer size, the buffer is resized to accommodate the new data.
+        """
+        if n > self.get_capacity():
+            self._resize_buf(n, max(self.capacity, n - self.capacity))
+            _ = self._fill_buffer()
 
-    #     coord = Slice(line_start, line_end)
+        var nels = min(n, self.len())
+        var data = Span[
+            is_mutable=False, T=UInt8, lifetime = __lifetime_of(self)
+        ](unsafe_ptr=self.buf + self.head, len=nels)
+        self.head += nels
+        return data
 
-    #     # Handle small buffers
-    #     if coord.end.value() == -1 and self.head == 0:
-    #         for i in range(MAX_SHIFT):
-    #             if coord.end.value() != -1:
-    #                 return self._handle_windows_sep(coord)
-    #             else:
-    #                 coord = self._line_coord_missing_line()
+    ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
+    ###-------------------------------------------------------------------------  BufferedLineIterator--------------------------------------------------------------------------------------------------------------###
+    ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
 
-    #     # Handle incomplete lines across two chunks
-    #     if coord.end.value() == -1:
-    #         print("incomplete lines across two chunks")
-    #         _ = self._fill_buffer()
-    #         return self._handle_windows_sep(self._line_coord_incomplete_line())
 
-    #     self.head = line_end + 1
+struct BufferedLineIterator:
+    var inner: BufferedReader
 
-    #     # Handling Windows-syle line seperator
-    #     if self.buf[line_end] == carriage_return:
-    #         line_end -= 1
-    #     var s = slice(line_start, line_end)
-    #     return s
+    fn __init__(
+        inout self, source: Path, capacity: Int = DEFAULT_CAPACITY
+    ) raises:
+        self.inner = BufferedReader(source, capacity)
 
-    # fn _line_coord_incomplete_line(inout self) raises -> Slice:
-    #     if self._check_buf_state():
-    #         _ = self._fill_buffer()
-    #     var line_start = self.head
-    #     var line_end = find_chr_next_occurance(self.buf, self.head)
-    #     self.head = line_end + 1
+    @always_inline
+    fn __len__(self) -> Int:
+        return len(self.inner)
 
-    #     # if self.buf[line_end] == carriage_return:
-    #     #     line_end -= 1
+    @always_inline
+    fn __getitem__(self, idx: Int) -> UInt8:
+        return self.inner[idx]
 
-    #     var s = slice(line_start, line_end)
-    #     return s
+    @always_inline
+    fn __getitem__(self, span: Slice) -> List[UInt8]:
+        return self.inner[span]
 
-    # @always_inline
-    # fn _line_coord_missing_line(inout self) raises -> Slice:
-    #     self._resize_buf(self.get_capacity(), MAX_CAPACITY)
-    #     _ = self._fill_buffer()
-    #     var line_start = self.head
-    #     var line_end = find_chr_next_occurance(self.buf, self.head)
-    #     self.head = line_end + 1
-    #     var s = slice(line_start, line_end)
-    #     return s
+    @always_inline
+    fn __setitem__(self, idx: Int, value: UInt8):
+        self.inner[idx] = value
+
+    fn read_line(inout self) raises -> List[UInt8]:
+        var idx = find_chr_next_occurance(
+            self.inner.buf, self.inner.len(), self.inner.head
+        )
+
+        # Handles broken lines across two chunks
+        if idx == -1:
+            _ = self.inner._fill_buffer()
+            return self.read_line()
+
+        # # Handle small buffer size
+        # if idx == -1:
+        #     for i in range(MAX_SHIFT):
+        #         self.inner._resize_buf(self.inner.get_capacity(), MAX_CAPACITY)
+        #         _ = self.inner._fill_buffer()
+        #         return self.read_line()
+
+        var res = self.inner.read_span(idx - self.inner.head)
+        self.inner._skip_delim()
+        return res
 
 
 fn main() raises:
     from pathlib import Path
 
-    var b = BufferedReader(
+    var b = BufferedLineIterator(
         Path(
             "/home/mohamed/Documents/Projects/BlazeSeq/data/M_abscessus_HiSeq.fq"
         ),
         64 * 1024,
     )
+    var n = 0
+    while True:
+        try:
+            var x = b.read_line()
+            n += len(x)
+        except Error:
+            break
+    print(n / 4)
+
+    # var x = b.read_line()
+    # n += len(x)
+    # x.append(0)
+    # print(String(x))
 
     # for i in range(30):
     #     print(b[i])
-
-    while True:
-        var s = b.read(100)
-        print(String(s))
+    # print(String(b[Slice(0, 200+1)]))
 
     # for i in range(10):
     #     print(s[i])

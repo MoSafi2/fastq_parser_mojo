@@ -3,6 +3,7 @@ from sys.info import sizeof
 
 alias width = sizeof[DType.uint8]()
 
+
 @always_inline
 fn arg_true[simd_width: Int](v: SIMD[DType.bool, simd_width]) -> Int:
     for i in range(simd_width):
@@ -11,17 +12,17 @@ fn arg_true[simd_width: Int](v: SIMD[DType.bool, simd_width]) -> Int:
     return -1
 
 
-fn find_chr_next_occurance[T: DType](buffer: List[Scalar[T]], start: UInt, chr: UInt = 10) -> Int: 
-    var length = len(buffer)
-    var aligned = start + align_down(length, width)
-
+fn find_chr_next_occurance(
+    buffer: UnsafePointer[UInt8], len: UInt, start: UInt, chr: UInt = 10
+) -> Int:
+    var aligned = start + align_down(len, width)
     for s in range(start, aligned, width):
-        var v = buffer.unsafe_ptr().load[width = width](s)
+        var v = buffer.load[width=width](s)
         var mask = v == chr
         if mask.reduce_or():
             return s + arg_true(mask)
 
-    for i in range(aligned, length):
+    for i in range(aligned, len):
         if buffer[i] == chr:
             return i
     return -1
