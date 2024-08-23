@@ -1,4 +1,4 @@
-from blazeseq.record import FastqRecord
+from blazeseq.record import FastqRecord, RecordCoord
 from blazeseq.CONSTS import *
 
 # from blazeseq.stats import FullStats
@@ -20,8 +20,7 @@ struct RecordParser:
         while True:
             var record: FastqRecord
             record = self._parse_record()
-            # print(record)
-            # _ = record.validate_record()
+            _ = record.validate_record()
 
             # ASCII validation is carried out in the reader
             # @parameter
@@ -76,92 +75,52 @@ struct RecordParser:
         return schema
 
 
-# struct CoordParser:
-#     var stream: BufferedLineIterator
+struct CoordParser:
+    var stream: BufferedLineIterator
 
-#     fn __init__(inout self, path: String) raises -> None:
-#         self.stream = BufferedLineIterator(path, DEFAULT_CAPACITY)
+    fn __init__(inout self, path: String) raises -> None:
+        self.stream = BufferedLineIterator(path, DEFAULT_CAPACITY)
 
-#     @always_inline
-#     fn parse_all(inout self) raises:
-#         while True:
-#             var record: RecordCoord
-#             record = self._parse_record()
-#             record.validate()
+    @always_inline
+    fn parse_all(inout self) raises:
+        while True:
+            var record: RecordCoord
+            record = self._parse_record()
+            record.validate()
 
-#     @always_inline
-#     fn next(inout self) raises -> RecordCoord:
-#         var read: RecordCoord
-#         read = self._parse_record()
-#         read.validate()
-#         return read
+    @always_inline
+    fn next(inout self) raises -> RecordCoord:
+        var read: RecordCoord
+        read = self._parse_record()
+        read.validate()
+        return read
 
-#     @always_inline
-#     fn _parse_record(inout self) raises -> RecordCoord:
-#         var line1 = self.stream.read_next_coord()
-#         if (
-#             self.stream.buf[self.stream.map_pos_2_buf(line1.start.value())]
-#             != read_header
-#         ):
-#             raise Error("Sequence Header is corrupt")
+    @always_inline
+    fn _parse_record(inout self) raises -> RecordCoord:
+        var line1 = self.stream.read_line_span()
+        if line1[0] != "@":
+            print("String:", line1[0])
+            raise Error("Sequence Header is corrupt")
 
-#         var line2 = self.stream.read_next_coord()
-
-#         var line3 = self.stream.read_next_coord()
-#         if (
-#             self.stream.buf[self.stream.map_pos_2_buf(line3.start.value())]
-#             != quality_header
-#         ):
-#             raise Error("Quality Header is corrupt")
-
-#         var line4 = self.stream.read_next_coord()
-#         return RecordCoord(line1, line2, line3, line4)
-
-#     @always_inline
-#     fn _parse_record2(inout self) raises -> RecordCoord:
-#         var coords = self.stream.read_n_coords[4]()
-#         var n = 0
-#         if self.stream.buf[coords[0].start.value()] != read_header:
-#             print(
-#                 coords[n],
-#                 StringRef(
-#                     self.stream.buf.unsafe_ptr() + coords[n].start.value(),
-#                     coords[n].end.value() - coords[n].start.value(),
-#                 ),
-#             )
-#             raise Error("Sequence Header is corrupt")
-
-#         if self.stream.buf[coords[2].start.value()] != quality_header:
-#             raise Error("Quality Header is corrupt")
-
-#         return RecordCoord(coords[0], coords[1], coords[2], coords[3])
+        var line2 = self.stream.read_line_span()
+        var line3 = self.stream.read_line_span()
+        if line3[0] != "+":
+            raise Error("Quality Header is corrupt")
+        var line4 = self.stream.read_line_span()
+        return RecordCoord(line1, line2, line3, line4)
 
 
 fn main() raises:
     var n = 0
-    var parser = RecordParser("data/M_abscessus_HiSeq.fq")
+    var parser = CoordParser("data/M_abscessus_HiSeq.fq")
 
-    # for i in range(500):
-    #     l1 = parser.stream.read_line()
-    #     l2 = parser.stream.read_line()
-    #     l3 = parser.stream.read_line()
-    #     l4 = parser.stream.read_line()
-    #     l1.append(0)
-    #     l2.append(0)
-    #     l3.append(0)
-    #     l4.append(0)
-    #     l1.append(10)
-    #     l2.append(10)
-    #     l3.append(10)
-    #     l4.append(10)
-        # print(String(l1), String(l2), String(l3), String(l4))
-    # print(r.__str__())
     var start = time.now()
     while True:
         try:
             var record = parser.next()
             n += 1
         except Error:
+            print(Error._message())
             print(n)
             break
     var end = time.now()

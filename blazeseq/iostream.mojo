@@ -192,9 +192,9 @@ struct BufferedReader(Sized):
         """Skips one byte of the buffer."""
         self.head += 1
 
-        if self._check_buf_state():
-            self._reset_buffer()
-            _ = self._fill_buffer()
+        # if self._check_buf_state():
+        #     self._reset_buffer()
+        #     _ = self._fill_buffer()
 
     ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
     ###--------------------------------------------------------------  Public methods with side effect--------------------------------------------------------------------------------------------------------------###
@@ -216,18 +216,14 @@ struct BufferedReader(Sized):
         return data
 
     @always_inline
-    fn read_span(
-        inout self, n: Int
-    ) raises -> Span[is_mutable=False, T=UInt8, lifetime = __lifetime_of(self)]:
+    fn read_span(inout self, n: Int) raises -> StringRef:
         """Read n bytes from the buffer."""
         if self._check_buf_state():
             self._reset_buffer()
             _ = self._fill_buffer()
 
         var nels = min(n, self.len())
-        var data = Span[
-            is_mutable=False, T=UInt8, lifetime = __lifetime_of(self)
-        ](unsafe_ptr=self.buf + self.head, len=nels)
+        var data = StringRef(self.buf + self.head, nels)
         self.head += nels
         return data
 
@@ -305,7 +301,7 @@ struct BufferedLineIterator:
         self.inner[idx] = value
 
     # TODO: Handle small buffers as well
-
+    @always_inline
     fn read_line(inout self) raises -> List[UInt8]:
         var idx = find_chr_next_occurance(
             self.inner.buf, self.inner.len(), self.inner.head
@@ -313,25 +309,20 @@ struct BufferedLineIterator:
 
         if idx == -1:
             _ = self.inner._fill_buffer()
-            # print("\nbroken line\n")
-            # idx = find_chr_next_occurance(
-            #     self.inner.buf, self.inner.len(), self.inner.head
-            # )
-            return self.read_line()
+            idx = find_chr_next_occurance(
+                self.inner.buf, self.inner.len(), self.inner.head
+            )
 
         var res = self.inner.read(idx - self.inner.head)
         self.inner._skip_delim()
         return res
 
     @always_inline
-    fn read_line_span(
-        inout self,
-    ) raises -> Span[is_mutable=False, T=UInt8, lifetime = __lifetime_of(self)]:
+    fn read_line_span(inout self) raises -> StringRef:
         var idx = find_chr_next_occurance(
             self.inner.buf, self.inner.len(), self.inner.head
         )
 
-        # Handles broken lines across two chunks
         if idx == -1:
             _ = self.inner._fill_buffer()
             idx = find_chr_next_occurance(
@@ -341,40 +332,3 @@ struct BufferedLineIterator:
         var res = self.inner.read_span(idx - self.inner.head)
         self.inner._skip_delim()
         return res
-
-    ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
-    ###-------------------------------------------------------------------------  read_line_diff_impl --------------------------------------------------------------------------------------------------------------###
-    ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
-
-
-# fn main() raises:
-#     from pathlib import Path
-
-#     var b = BufferedLineIterator(
-#         Path(
-#             "/home/mmabrouk/Documents/Projects/BlazeSeq/data/M_abscessus_HiSeq.fq"
-#         ),
-#         64 * 1024,
-#     )
-#     var n = 0
-#     while True:
-#         try:
-#             var x = b.read_line()
-#             n += 1
-
-#         except Error:
-#             print(Error._message())
-#             break
-
-# while True:
-#     try:
-#         var x = b.read_line()
-#         n += 1
-#         x.append(0)
-#         # print(String(x), b.inner.head, b.inner.end)
-
-#     except Error:
-#         print(Error._message())
-#         break
-
-# print(n / 4)

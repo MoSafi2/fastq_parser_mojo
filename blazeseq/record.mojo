@@ -75,13 +75,12 @@ struct FastqRecord(Sized, Stringable, CollectionElement):
             temp[i] = temp[i] - schema.OFFSET
         return temp
 
-    # @always_inline
-    # fn get_qulity_scores(self, schema: QualitySchema) -> LU8:
-    #     schema = self._parse_schema((schema))
-    #     temp = self.QuStr
-    #     for i in range(len(temp)):
-    #         temp[i] = temp[i] - schema.OFFSET
-    #     return temp
+    @always_inline
+    fn get_qulity_scores(self, schema: QualitySchema) -> LU8:
+        temp = self.QuStr
+        for i in range(len(temp)):
+            temp[i] = temp[i] - schema.OFFSET
+        return temp
 
     @always_inline
     fn get_qulity_scores(self, offset: UInt8) -> LU8:
@@ -103,12 +102,10 @@ struct FastqRecord(Sized, Stringable, CollectionElement):
     @always_inline
     fn validate_record(self) raises -> Bool:
         if self.SeqHeader[0] != read_header:
-            print(self.SeqHeader[0])
             print("Sequence Header is corrupt")
             return False
 
         if self.QuHeader[0] != quality_header:
-            print(self.QuHeader[0])
             print("Quality Header is corrupt")
             return False
 
@@ -118,14 +115,12 @@ struct FastqRecord(Sized, Stringable, CollectionElement):
 
         if self.len_qu_header() > 1:
             if self.len_qu_header() != self.len_seq_header():
-                print(self.len_qu_header(), self.len_seq_header()),
                 print("Quality Header is corrupt")
                 return False
 
         if self.len_qu_header() > 1:
             for i in range(1, self.len_qu_header()):
                 if self.QuHeader[i] != self.SeqHeader[i]:
-                    print(self.QuHeader[i], self.SeqHeader[i])
                     print("Non matching headers")
                     return False
         return True
@@ -333,17 +328,17 @@ struct RecordCoord(Sized, Stringable, CollectionElement):
     """Struct that represent coordinates of a FastqRecord in a chunk. Provides minimal validation of the record. Mainly used for fast parsing.
     """
 
-    var SeqHeader: Slice
-    var SeqStr: Slice
-    var QuHeader: Slice
-    var QuStr: Slice
+    var SeqHeader: StringRef
+    var SeqStr: StringRef
+    var QuHeader: StringRef
+    var QuStr: StringRef
 
     fn __init__(
         inout self,
-        SH: Slice,
-        SS: Slice,
-        QH: Slice,
-        QS: Slice,
+        SH: StringRef,
+        SS: StringRef,
+        QH: StringRef,
+        QS: StringRef,
     ):
         self.SeqHeader = SH
         self.SeqStr = SS
@@ -362,19 +357,19 @@ struct RecordCoord(Sized, Stringable, CollectionElement):
 
     @always_inline
     fn seq_len(self) -> Int32:
-        return self.SeqStr.end.value() - self.SeqStr.start.value()
+        return self.SeqStr.length
 
     @always_inline
     fn qu_len(self) -> Int32:
-        return self.QuStr.end.value() - self.QuStr.start.value()
+        return self.QuStr.length
 
     @always_inline
     fn qu_header_len(self) -> Int32:
-        return self.QuHeader.end.value() - self.QuHeader.start.value()
+        return self.QuHeader.length
 
     @always_inline
     fn seq_header_len(self) -> Int32:
-        return self.SeqHeader.end.value() - self.SeqHeader.start.value()
+        return self.SeqHeader.length
 
     fn __len__(self) -> Int:
         return int(self.seq_len())
@@ -382,21 +377,13 @@ struct RecordCoord(Sized, Stringable, CollectionElement):
     fn __str__(self) -> String:
         return (
             String("SeqHeader: ")
-            + str(self.SeqHeader.start.value())
-            + "..."
-            + str(self.SeqHeader.end.value())
+            + str(self.SeqHeader.length)
             + "\nSeqStr: "
-            + str(self.SeqStr.start.value())
-            + "..."
-            + str(self.SeqStr.end.value())
+            + str(self.SeqStr.length)
             + "\nQuHeader: "
-            + str(self.QuHeader.start.value())
-            + "..."
-            + str(self.QuHeader.end.value())
+            + str(self.QuHeader.length)
             + "\nQuStr: "
-            + str(self.QuStr.start.value())
-            + "..."
-            + str(self.QuStr.end.value())
+            + str(self.QuStr.length)
         )
 
 
