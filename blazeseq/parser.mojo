@@ -6,7 +6,7 @@ from blazeseq.iostream import BufferedLineIterator
 import time
 
 
-struct RecordParser[validate_ascii: Bool = True, validate_quality: Bool = True]:
+struct RecordParser:
     var stream: BufferedLineIterator
     var quality_schema: QualitySchema
 
@@ -33,9 +33,9 @@ struct RecordParser[validate_ascii: Bool = True, validate_quality: Bool = True]:
         """Method that lazily returns the Next record in the file."""
         var record: FastqRecord
         record = self._parse_record()
-        # _ = record.validate_record()
+        _ = record.validate_record()
 
-        # # ASCII validation is carried out in the reader
+        # ASCII validation is carried out in the reader
         # @parameter
         # if validate_quality:
         #     _ = record.validate_quality_schema()
@@ -137,22 +137,32 @@ struct RecordParser[validate_ascii: Bool = True, validate_quality: Bool = True]:
 #         return RecordCoord(coords[0], coords[1], coords[2], coords[3])
 
 
-# fn main() raises:
-#     var n = 0
-#     var parser = RecordParser("data/M_abscessus_HiSeq.fq")
-#     var start = time.now()
-#     while True:
-#         try:
-#             var record = parser.next()
-#             n += 1
-#         except Error:
-#             print(n)
-#             break
-#     var end = time.now()
-#     print("Time taken: ", (end - start) / 1e9)
+fn main() raises:
+    var n = 0
+    var parser = RecordParser("data/M_abscessus_HiSeq.fq")
 
-    # var coord_parser = CoordParser("tests/data/test.fastq")
-    # var start = time.time()
-    # coord_parser.parse_all()
-    # var end = time.time()
-    # print("Time taken: ", end - start)
+    # for i in range(500):
+    #     l1 = parser.stream.read_line()
+    #     l2 = parser.stream.read_line()
+    #     l3 = parser.stream.read_line()
+    #     l4 = parser.stream.read_line()
+    #     l1.append(0)
+    #     l2.append(0)
+    #     l3.append(0)
+    #     l4.append(0)
+    #     l1.append(10)
+    #     l2.append(10)
+    #     l3.append(10)
+    #     l4.append(10)
+        # print(String(l1), String(l2), String(l3), String(l4))
+    # print(r.__str__())
+    var start = time.now()
+    while True:
+        try:
+            var record = parser.next()
+            n += 1
+        except Error:
+            print(n)
+            break
+    var end = time.now()
+    print("Time taken: ", (end - start) / 1e9)

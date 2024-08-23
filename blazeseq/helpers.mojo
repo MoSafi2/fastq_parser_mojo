@@ -16,7 +16,7 @@ fn find_chr_next_occurance(
     buffer: UnsafePointer[UInt8], len: UInt, start: UInt, chr: UInt = 10
 ) -> Int:
     # print("find_chr_next_occurance", len, start)
-    var aligned = start + align_down(start + len, width)
+    var aligned = start + align_down(len, width)
     for s in range(start, aligned, width):
         var v = buffer.load[width=width](s)
         var mask = v == chr
@@ -32,7 +32,6 @@ fn find_chr_next_occurance(
     #         return i
 
     return -1
-
 
 
 @value

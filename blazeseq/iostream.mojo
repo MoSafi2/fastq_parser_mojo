@@ -305,18 +305,19 @@ struct BufferedLineIterator:
         self.inner[idx] = value
 
     # TODO: Handle small buffers as well
-    @always_inline
+
     fn read_line(inout self) raises -> List[UInt8]:
         var idx = find_chr_next_occurance(
             self.inner.buf, self.inner.len(), self.inner.head
         )
 
-        # Handles broken lines across two chunks
         if idx == -1:
             _ = self.inner._fill_buffer()
-            idx = find_chr_next_occurance(
-                self.inner.buf, self.inner.len(), self.inner.head
-            )
+            # print("\nbroken line\n")
+            # idx = find_chr_next_occurance(
+            #     self.inner.buf, self.inner.len(), self.inner.head
+            # )
+            return self.read_line()
 
         var res = self.inner.read(idx - self.inner.head)
         self.inner._skip_delim()
@@ -365,15 +366,15 @@ struct BufferedLineIterator:
 #             print(Error._message())
 #             break
 
-    # while True:
-    #     try:
-    #         var x = b.read_line()
-    #         n += 1
-    #         x.append(0)
-    #         # print(String(x), b.inner.head, b.inner.end)
+# while True:
+#     try:
+#         var x = b.read_line()
+#         n += 1
+#         x.append(0)
+#         # print(String(x), b.inner.head, b.inner.end)
 
-    #     except Error:
-    #         print(Error._message())
-    #         break
+#     except Error:
+#         print(Error._message())
+#         break
 
-    # print(n / 4)
+# print(n / 4)

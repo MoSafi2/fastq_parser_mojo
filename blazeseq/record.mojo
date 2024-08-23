@@ -103,10 +103,12 @@ struct FastqRecord(Sized, Stringable, CollectionElement):
     @always_inline
     fn validate_record(self) raises -> Bool:
         if self.SeqHeader[0] != read_header:
+            print(self.SeqHeader[0])
             print("Sequence Header is corrupt")
             return False
 
         if self.QuHeader[0] != quality_header:
+            print(self.QuHeader[0])
             print("Quality Header is corrupt")
             return False
 
@@ -116,12 +118,14 @@ struct FastqRecord(Sized, Stringable, CollectionElement):
 
         if self.len_qu_header() > 1:
             if self.len_qu_header() != self.len_seq_header():
+                print(self.len_qu_header(), self.len_seq_header()),
                 print("Quality Header is corrupt")
                 return False
 
         if self.len_qu_header() > 1:
             for i in range(1, self.len_qu_header()):
                 if self.QuHeader[i] != self.SeqHeader[i]:
+                    print(self.QuHeader[i], self.SeqHeader[i])
                     print("Non matching headers")
                     return False
         return True
