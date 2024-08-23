@@ -39,64 +39,64 @@ trait Analyser(CollectionElement, Stringable):
         ...
 
 
-# @value
-# struct FullStats(Stringable, CollectionElement):
-#     var num_reads: Int64
-#     var total_bases: Int64
-#     var bp_dist: BasepairDistribution
-#     var len_dist: LengthDistribution
-#     var qu_dist: QualityDistribution
-#     var cg_content: CGContent
-#     var dup_reads: DupReads
-#     var kmer_content: KmerContent
+@value
+struct FullStats(Stringable, CollectionElement):
+    var num_reads: Int64
+    var total_bases: Int64
+    var bp_dist: BasepairDistribution
+    var len_dist: LengthDistribution
+    var qu_dist: QualityDistribution
+    var cg_content: CGContent
+    var dup_reads: DupReads
+    var kmer_content: KmerContent
 
-#     fn __init__(inout self):
-#         self.num_reads = 0
-#         self.total_bases = 0
-#         self.len_dist = LengthDistribution()
-#         self.bp_dist = BasepairDistribution()
-#         self.qu_dist = QualityDistribution()
-#         self.cg_content = CGContent()
-#         self.dup_reads = DupReads()
-#         self.kmer_content = KmerContent(hash_list(), 12)
+    fn __init__(inout self):
+        self.num_reads = 0
+        self.total_bases = 0
+        self.len_dist = LengthDistribution()
+        self.bp_dist = BasepairDistribution()
+        self.qu_dist = QualityDistribution()
+        self.cg_content = CGContent()
+        self.dup_reads = DupReads()
+        self.kmer_content = KmerContent(hash_list(), 12)
 
-#     @always_inline
-#     fn tally(inout self, record: FastqRecord):
-#         self.num_reads += 1
-#         self.total_bases += record.len_record()
-#         self.bp_dist.tally_read(record)
-#         self.len_dist.tally_read(record)
-#         self.cg_content.tally_read(record)  # Almost Free
-#         self.dup_reads.tally_read(record)
-#         self.kmer_content.tally_read(record)
+    @always_inline
+    fn tally(inout self, record: FastqRecord):
+        self.num_reads += 1
+        self.total_bases += record.len_record()
+        self.bp_dist.tally_read(record)
+        self.len_dist.tally_read(record)
+        self.cg_content.tally_read(record)  # Almost Free
+        self.dup_reads.tally_read(record)
+        self.kmer_content.tally_read(record)
 
-#         # BUG: There is a bug here which causes core dumped
-#         self.qu_dist.tally_read(
-#             record
-#         )  # Expensive operation, a lot of memory access
+        # BUG: There is a bug here which causes core dumped
+        self.qu_dist.tally_read(
+            record
+        )  # Expensive operation, a lot of memory access
 
-#     @always_inline
-#     fn plot(inout self) raises:
-#         self.bp_dist.plot()
-#         self.cg_content.plot()
-#         self.len_dist.plot()
-#         self.qu_dist.plot()
-#         self.dup_reads.plot()
+    @always_inline
+    fn plot(inout self) raises:
+        self.bp_dist.plot()
+        self.cg_content.plot()
+        self.len_dist.plot()
+        self.qu_dist.plot()
+        self.dup_reads.plot()
 
-#     fn __str__(self) -> String:
-#         return (
-#             String("Number of Reads: ")
-#             + str(self.num_reads)
-#             + ". \n"
-#             + "Number of bases: "
-#             + str(self.total_bases)
-#             + str(self.bp_dist)
-#             + str(self.len_dist)
-#             + str(self.qu_dist)
-#             + str(self.cg_content)
-#             + str(self.kmer_content)
-#             + str(self.dup_reads)
-#         )
+    fn __str__(self) -> String:
+        return (
+            String("Number of Reads: ")
+            + str(self.num_reads)
+            + ". \n"
+            + "Number of bases: "
+            + str(self.total_bases)
+            + str(self.bp_dist)
+            + str(self.len_dist)
+            + str(self.qu_dist)
+            + str(self.cg_content)
+            + str(self.kmer_content)
+            + str(self.dup_reads)
+        )
 
 
 @value
@@ -287,7 +287,7 @@ struct DupReads(Analyser):
             print(index[])
             print(self.corrected_counts[index[]])
             temp_tensor[i * 2] = index[]
-            temp_tensor[i * 2 + 1] = self.corrected_counts[index[]]
+            # temp_tensor[i * 2 + 1] = self.corrected_counts[index[]]
             i += 1
 
         var np = Python.import_module("numpy")
@@ -543,7 +543,7 @@ fn grow_tensor[
     T: DType,
 ](old_tensor: Tensor[T], num_ele: Int) -> Tensor[T]:
     var new_tensor = Tensor[T](num_ele)
-    cpy_tensor(new_tensor, old_tensor, old_tensor.num_elements(), 0, 0)
+    # cpy_tensor(new_tensor, old_tensor, old_tensor.num_elements(), 0, 0)
     return new_tensor
 
 
