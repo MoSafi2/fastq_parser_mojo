@@ -3,7 +3,8 @@
 from blazeseq.record import FastqRecord
 from collections import Dict, KeyElement
 import time
-from python import Python
+from tensor import Tensor, TensorShape
+from python import Python, PythonObject
 from utils.static_tuple import StaticTuple
 
 alias py_lib: String = "./.pixi/envs/default/lib/python3.12/site-packages/"
@@ -31,7 +32,7 @@ trait Analyser(CollectionElement, Stringable):
     fn tally_read(inout self, record: FastqRecord):
         ...
 
-    fn report(self) -> List[UInt64]:
+    fn report(self) -> Tensor[DType.int64]:
         ...
 
     fn __str__(self) -> String:
@@ -100,7 +101,7 @@ trait Analyser(CollectionElement, Stringable):
 
 @value
 struct BasepairDistribution(Analyser):
-    var bp_dist: LU64
+    var bp_dist: Tensor[DType.int64]
     var max_length: Int
 
     fn __init__(inout self):

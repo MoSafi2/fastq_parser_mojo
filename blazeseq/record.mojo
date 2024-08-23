@@ -10,7 +10,7 @@ alias schema = Variant[String, QualitySchema]
 
 
 @value
-struct FastqRecord(Sized, Stringable, CollectionElement):
+struct FastqRecord(Sized, Stringable, CollectionElement, KeyElement):
     """Struct that represent a single FastaQ record."""
 
     var SeqHeader: LU8
@@ -70,21 +70,21 @@ struct FastqRecord(Sized, Stringable, CollectionElement):
     @always_inline
     fn get_qulity_scores(self, quality_format: String) -> LU8:
         var schema = self._parse_schema((quality_format))
-        temp = self.QuStr
+        var temp = self.QuStr
         for i in range(len(temp)):
             temp[i] = temp[i] - schema.OFFSET
         return temp
 
     @always_inline
     fn get_qulity_scores(self, schema: QualitySchema) -> LU8:
-        temp = self.QuStr
+        var temp = self.QuStr
         for i in range(len(temp)):
             temp[i] = temp[i] - schema.OFFSET
         return temp
 
     @always_inline
     fn get_qulity_scores(self, offset: UInt8) -> LU8:
-        temp = self.QuStr
+        var temp = self.QuStr
         for i in range(len(temp)):
             temp[i] = temp[i] - offset
         return temp
@@ -312,7 +312,7 @@ struct FastqRecord(Sized, Stringable, CollectionElement):
         return full_hash
 
     @always_inline
-    fn __hash__(self) -> Int:
+    fn __hash__(self) -> UInt:
         return int(self.hash())
 
     @always_inline

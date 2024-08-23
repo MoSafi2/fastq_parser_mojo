@@ -1,5 +1,13 @@
 from math import align_down
 from sys.info import sizeof
+from blazeseq.CONSTS import (
+    sanger_schema,
+    solexa_schema,
+    illumina_1_3_schema,
+    illumina_1_5_schema,
+    illumina_1_8,
+    generic_schema,
+)
 
 alias width = sizeof[DType.uint8]()
 
@@ -60,3 +68,29 @@ struct QualitySchema(Stringable, CollectionElement):
             + "\nOffset: "
             + str(self.OFFSET)
         )
+
+
+@always_inline
+fn _parse_schema(quality_format: String) -> QualitySchema:
+    var schema: QualitySchema
+
+    if quality_format == "sanger":
+        schema = sanger_schema
+    elif quality_format == "solexa":
+        schema = solexa_schema
+    elif quality_format == "illumina_1.3":
+        schema = illumina_1_3_schema
+    elif quality_format == "illumina_1.5":
+        schema = illumina_1_5_schema
+    elif quality_format == "illumina_1.8":
+        schema = illumina_1_8
+    elif quality_format == "generic":
+        schema = generic_schema
+    else:
+        print(
+            """Uknown quality schema please choose one of 'sanger', 'solexa',"
+            " 'illumina_1.3', 'illumina_1.5' 'illumina_1.8', or 'generic'.
+            Parsing with generic schema."""
+        )
+        return generic_schema
+    return schema

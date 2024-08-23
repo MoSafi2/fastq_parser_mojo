@@ -41,8 +41,6 @@ struct BufferedReader(Sized):
         self.end = 0
         self.capacity = capacity
 
-        _ = self._fill_buffer_init()
-
     @always_inline
     fn __getitem__(self, idx: Int) -> UInt8:
         """Get a single  value at the given index."""
