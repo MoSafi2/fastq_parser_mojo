@@ -3,7 +3,7 @@ from blazeseq.iostream import BufferedLineIterator
 from utils.variant import Variant
 from utils import Span
 from math import align_down, remainder
-
+from blazeseq.helpers import _validate_ascii
 
 alias LU8 = List[UInt8]
 alias schema = Variant[String, QualitySchema]
@@ -100,41 +100,41 @@ struct FastqRecord(Sized, Stringable, CollectionElement, KeyElement):
         return self.__concat_record_tensor()
 
     @always_inline
-    fn validate_record(self) raises -> Bool:
+    fn validate_record_format(self) raises:
         if self.SeqHeader[0] != read_header:
-            print("Sequence Header is corrupt")
-            return False
+            raise Error("Sequence Header is corrupt")
 
         if self.QuHeader[0] != quality_header:
-            print("Quality Header is corrupt")
-            return False
+            raise Error("Quality Header is corrupt")
 
         if self.len_record() != self.len_quality():
-            print("Corrput Lengths")
-            return False
+            raise Error("Corrput Lengths")
 
         if self.len_qu_header() > 1:
             if self.len_qu_header() != self.len_seq_header():
-                print("Quality Header is corrupt")
-                return False
+                raise Error("Quality Header is corrupt")
 
         if self.len_qu_header() > 1:
             for i in range(1, self.len_qu_header()):
                 if self.QuHeader[i] != self.SeqHeader[i]:
-                    print("Non matching headers")
-                    return False
-        return True
+                    raise Error("Non matching headers")
 
     @always_inline
-    fn validate_quality_schema(self) raises -> Bool:
+    fn validate_quality_schema(self) raises:
         for i in range(self.len_quality()):
             if (
                 self.QuStr[i] > self.quality_schema.UPPER
                 or self.QuStr[i] < self.quality_schema.LOWER
             ):
-                print("Corrput quality score according to proivded schema")
-                return False
-        return True
+                raise Error(
+                    "Corrput quality score according to proivded schema"
+                )
+
+    fn validate_ascii(self) raises:
+        _validate_ascii(self.QuStr.unsafe_ptr(), self.len_quality())
+        _validate_ascii(self.SeqStr.unsafe_ptr(), self.len_record())
+        _validate_ascii(self.QuHeader.unsafe_ptr(), self.len_qu_header())
+        _validate_ascii(self.SeqHeader.unsafe_ptr(), self.len_seq_header())
 
     @always_inline
     fn total_length(self) -> Int:

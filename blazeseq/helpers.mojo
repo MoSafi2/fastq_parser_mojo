@@ -94,3 +94,10 @@ fn _parse_schema(quality_format: String) -> QualitySchema:
         )
         return generic_schema
     return schema
+
+
+@always_inline
+fn _validate_ascii(buffer: UnsafePointer[UInt8], len: UInt) raises:
+    for i in range(len):
+        if buffer[i] < 33 or buffer[i] > 126:
+            raise Error("Invalid ASCII character found in the record.")

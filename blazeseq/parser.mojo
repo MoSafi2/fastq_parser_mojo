@@ -5,7 +5,7 @@ from blazeseq.iostream import BufferedLineIterator
 import time
 
 
-struct RecordParser[validate_quality: Bool = True]:
+struct RecordParser[validate_quality: Bool = True, validate_ascii: Bool = True]:
     var stream: BufferedLineIterator
     var quality_schema: QualitySchema
 
@@ -19,24 +19,34 @@ struct RecordParser[validate_quality: Bool = True]:
         while True:
             var record: FastqRecord
             record = self._parse_record()
-            _ = record.validate_record()
+            _ = record.validate_record_format()
 
             # ASCII validation is carried out in the reader
-            # @parameter
-            # if validate_quality:
-            #     _ = record.validate_quality_schema()
+
+            @parameter
+            if validate_ascii:
+                _ = record.validate_ascii()
+
+            @parameter
+            if validate_quality:
+                _ = record.validate_quality_schema()
 
     @always_inline
     fn next(inout self) raises -> FastqRecord:
         """Method that lazily returns the Next record in the file."""
         var record: FastqRecord
         record = self._parse_record()
-        _ = record.validate_record()
+        _ = record.validate_record_format()
 
         # ASCII validation is carried out in the reader
         @parameter
+        if validate_ascii:
+            _ = record.validate_ascii()
+
+        @parameter
         if validate_quality:
             _ = record.validate_quality_schema()
+
         return record
 
     @always_inline
@@ -83,17 +93,17 @@ struct CoordParser:
         return RecordCoord(line1, line2, line3, line4)
 
 
-# fn main() raises:
-#     var n = 0
-#     var parser = RecordParser("data/M_abscessus_HiSeq.fq")
+fn main() raises:
+    var n = 0
+    var parser = RecordParser("data/M_abscessus_HiSeq.fq")
 
-#     var start = time.now()
-#     while True:
-#         try:
-#             var record = parser.next()
-#             n += 1
-#         except Error:
-#             print(n)
-#             break
-#     var end = time.now()
-#     print("Time taken: ", (end - start) / 1e9)
+    var start = time.now()
+    while True:
+        try:
+            var record = parser.next()
+            n += 1
+        except Error:
+            print(n)
+            break
+    var end = time.now()
+    print("Time taken: ", (end - start) / 1e9)

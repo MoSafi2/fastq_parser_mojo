@@ -47,7 +47,9 @@ fn test_valid() raises:
     test_valid_file("illumina_full_range_as_illumina.fastq", "illumina_1.3")
     test_valid_file("illumina_full_range_as_sanger.fastq", "sanger")
     test_valid_file("illumina_full_range_as_solexa.fastq", "solexa")
-    test_valid_file("illumina_full_range_original_illumina.fastq", "illumina_1.3")
+    test_valid_file(
+        "illumina_full_range_original_illumina.fastq", "illumina_1.3"
+    )
     test_valid_file("longreads_as_illumina.fastq", "illumina_1.3")
     test_valid_file("longreads_as_sanger.fastq", "sanger")
     test_valid_file("longreads_as_solexa.fastq", "solexa")
