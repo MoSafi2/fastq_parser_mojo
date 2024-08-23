@@ -1,13 +1,11 @@
-from blazeseq.helpers import slice_tensor, write_to_buff
 from blazeseq.CONSTS import *
 from blazeseq.iostream import BufferedLineIterator
 from utils.variant import Variant
-from tensor import Tensor
 from utils import Span
 from math import align_down, remainder
 
 
-alias TU8 = Tensor[U8]
+alias LU8 = List[UInt8]
 alias schema = Variant[String, QualitySchema]
 
 
@@ -15,18 +13,18 @@ alias schema = Variant[String, QualitySchema]
 struct FastqRecord(Sized, Stringable, CollectionElement):
     """Struct that represent a single FastaQ record."""
 
-    var SeqHeader: TU8
-    var SeqStr: TU8
-    var QuHeader: TU8
-    var QuStr: TU8
+    var SeqHeader: LU8
+    var SeqStr: LU8
+    var QuHeader: LU8
+    var QuStr: LU8
     var quality_schema: QualitySchema
 
     fn __init__(
         inout self,
-        SH: TU8,
-        SS: TU8,
-        QH: TU8,
-        QS: TU8,
+        SH: LU8,
+        SS: LU8,
+        QH: LU8,
+        QS: LU8,
         quality_schema: schema = "generic",
     ) raises:
         self.SeqHeader = SH
@@ -47,10 +45,10 @@ struct FastqRecord(Sized, Stringable, CollectionElement):
         QS: String,
         quality_schema: schema = "generic",
     ):
-        self.SeqHeader = Tensor[U8](SH.as_bytes())
-        self.SeqStr = Tensor[U8](SS.as_bytes())
-        self.QuHeader = Tensor[U8](QH.as_bytes())
-        self.QuStr = Tensor[U8](QS.as_bytes())
+        self.SeqHeader = SH.as_bytes()
+        self.SeqStr = SS.as_bytes()
+        self.QuHeader = QH.as_bytes()
+        self.QuStr = QS.as_bytes()
         if quality_schema.isa[String]():
             var q: String = quality_schema[String]
             self.quality_schema = self._parse_schema(q)
@@ -60,65 +58,84 @@ struct FastqRecord(Sized, Stringable, CollectionElement):
     @always_inline
     fn get_seq(self) -> String:
         var temp = self.SeqStr
-        return String(temp._steal_ptr(), temp.num_elements())
+        temp.append(0)
+        return String(temp)
 
     @always_inline
     fn get_qulity(self) -> String:
         var temp = self.QuStr
-        return String(temp._steal_ptr(), temp.num_elements())
+        temp.append(0)
+        return String(temp)
 
     @always_inline
-    fn get_qulity_scores(self, quality_format: String) -> Tensor[U8]:
+    fn get_qulity_scores(self, quality_format: String) -> LU8:
         var schema = self._parse_schema((quality_format))
-        return self.QuStr - schema.OFFSET
+        temp = self.QuStr
+        for i in range(len(temp)):
+            temp[i] = temp[i] - schema.OFFSET
+        return temp
+
+    # @always_inline
+    # fn get_qulity_scores(self, schema: QualitySchema) -> LU8:
+    #     schema = self._parse_schema((schema))
+    #     temp = self.QuStr
+    #     for i in range(len(temp)):
+    #         temp[i] = temp[i] - schema.OFFSET
+    #     return temp
 
     @always_inline
-    fn get_qulity_scores(self, schema: QualitySchema) -> Tensor[U8]:
-        return self.QuStr - schema.OFFSET
-
-    @always_inline
-    fn get_qulity_scores(self, offset: UInt8) -> Tensor[U8]:
-        return self.QuStr - offset
+    fn get_qulity_scores(self, offset: UInt8) -> LU8:
+        temp = self.QuStr
+        for i in range(len(temp)):
+            temp[i] = temp[i] - offset
+        return temp
 
     @always_inline
     fn get_header(self) -> String:
         var temp = self.SeqHeader
-        return String(temp._steal_ptr(), temp.num_elements())
+        temp.append(0)
+        return String(temp)
 
     @always_inline
-    fn wirte_record(self) -> Tensor[U8]:
+    fn wirte_record(self) -> LU8:
         return self.__concat_record_tensor()
 
     @always_inline
-    fn validate_record(self) raises:
+    fn validate_record(self) raises -> Bool:
         if self.SeqHeader[0] != read_header:
-            raise Error("Sequence Header is corrupt")
+            print("Sequence Header is corrupt")
+            return False
 
         if self.QuHeader[0] != quality_header:
-            raise Error("Quality Header is corrupt")
+            print("Quality Header is corrupt")
+            return False
 
         if self.len_record() != self.len_quality():
-            raise Error("Corrput Lengths")
+            print("Corrput Lengths")
+            return False
 
         if self.len_qu_header() > 1:
             if self.len_qu_header() != self.len_seq_header():
-                raise Error("Quality Header is corrupt")
+                print("Quality Header is corrupt")
+                return False
 
         if self.len_qu_header() > 1:
             for i in range(1, self.len_qu_header()):
                 if self.QuHeader[i] != self.SeqHeader[i]:
-                    raise Error("Non matching headers")
+                    print("Non matching headers")
+                    return False
+        return True
 
     @always_inline
-    fn validate_quality_schema(self) raises:
+    fn validate_quality_schema(self) raises -> Bool:
         for i in range(self.len_quality()):
             if (
                 self.QuStr[i] > self.quality_schema.UPPER
                 or self.QuStr[i] < self.quality_schema.LOWER
             ):
-                raise Error(
-                    "Corrput quality score according to proivded schema"
-                )
+                print("Corrput quality score according to proivded schema")
+                return False
+        return True
 
     @always_inline
     fn total_length(self) -> Int:
@@ -131,7 +148,7 @@ struct FastqRecord(Sized, Stringable, CollectionElement):
         )
 
     @always_inline
-    fn __concat_record_tensor(self) -> Tensor[U8]:
+    fn __concat_record_tensor(self) -> LU8:
         var final_list = List[UInt8](capacity=self.total_length())
 
         for i in range(self.len_seq_header()):
@@ -150,7 +167,7 @@ struct FastqRecord(Sized, Stringable, CollectionElement):
             final_list.append(self.QuStr[i])
         final_list.append(10)
 
-        return Tensor[U8](final_list)
+        return LU8(final_list)
 
     @always_inline
     fn __concat_record_str(self) -> String:
@@ -158,16 +175,20 @@ struct FastqRecord(Sized, Stringable, CollectionElement):
             return ""
 
         var line1 = self.SeqHeader
-        var line1_str = String(line1._steal_ptr(), self.len_seq_header() + 1)
+        line1.append(0)
+        var line1_str = String(line1)
 
         var line2 = self.SeqStr
-        var line2_str = String(line2._steal_ptr(), self.len_record() + 1)
+        line2.append(0)
+        var line2_str = String(line2)
 
         var line3 = self.QuHeader
-        var line3_str = String(line3._steal_ptr(), self.len_qu_header() + 1)
+        line3.append(0)
+        var line3_str = String(line3)
 
         var line4 = self.QuStr
-        var line4_str = String(line4._steal_ptr(), self.len_quality() + 1)
+        line4.append(0)
+        var line4_str = String(line4)
 
         return (
             line1_str
@@ -212,37 +233,39 @@ struct FastqRecord(Sized, Stringable, CollectionElement):
 
     @always_inline
     fn __len__(self) -> Int:
-        return self.SeqStr.num_elements()
+        return len(self.SeqStr)
 
     @always_inline
     fn len_record(self) -> Int:
-        return self.SeqStr.num_elements()
+        return len(self.SeqStr)
 
     @always_inline
     fn len_quality(self) -> Int:
-        return self.QuStr.num_elements()
+        return len(self.QuStr)
 
     @always_inline
     fn len_qu_header(self) -> Int:
-        return self.QuHeader.num_elements()
+        return len(self.QuHeader)
 
     @always_inline
     fn len_seq_header(self) -> Int:
-        return self.SeqHeader.num_elements()
+        return len(self.SeqHeader)
 
     @always_inline
     fn hash[bits: Int = 3, length: Int = 64 // bits](self) -> UInt64:
         """Hashes the first xx bp (if possible) into one 64bit. Max length is 64/nBits per bp.
         """
+
         @parameter
         if length < 32:
-            return self._hash_packed(self.SeqStr._ptr, length)
+            return self._hash_packed(self.SeqStr.unsafe_ptr(), length)
 
-        return self._hash_additive(self.SeqStr._ptr, length)
-
+        return self._hash_additive(self.SeqStr.unsafe_ptr(), length)
 
     @staticmethod
-    fn _hash_packed[bits: Int = 3](bytes: DTypePointer[DType.uint8], length: Int) -> UInt64:
+    fn _hash_packed[
+        bits: Int = 3
+    ](bytes: UnsafePointer[UInt8], length: Int) -> UInt64:
         """
         Hash the DNA strand to into 64bits unsigned number using xbit encoding.
         If the length of the bytes strand is longer than 32 bps, the hash is truncated for the first 32 bps.
@@ -254,14 +277,18 @@ struct FastqRecord(Sized, Stringable, CollectionElement):
         for i in range(min(rnge, length)):
             # Mask for for first <n> significant bits.
             var base_val = bytes[i] & mask
-            hash = (hash << bits)  | int(base_val)
+            hash = (hash << bits) | int(base_val)
         return hash
 
     @staticmethod
-    fn _hash_additive[bits: Int = 3](bytes: DTypePointer[DType.uint8], length: Int) -> UInt64:
+    fn _hash_additive[
+        bits: Int = 3
+    ](bytes: UnsafePointer[UInt8], length: Int) -> UInt64:
         """Hashes DNA sequences longer than 32bps. It hashes 16bps spans of the sequences and using 2 or 3 bit encoding and adds them to the hash.
         """
-        constrained[bits <=3, "Additive hashing can only hash up to 3bit resolution"]()
+        constrained[
+            bits <= 3, "Additive hashing can only hash up to 3bit resolution"
+        ]()
         var full_hash: UInt64 = 0
         var mask = (0b1 << bits) - 1
         var rounds = align_down(length, 16)
@@ -269,16 +296,17 @@ struct FastqRecord(Sized, Stringable, CollectionElement):
 
         for round in range(rounds):
             var interim_hash: UInt64 = 0
+
             @parameter
             for i in range(16):
-                var base_val = bytes[i + 16*round] & mask
+                var base_val = bytes[i + 16 * round] & mask
                 interim_hash = interim_hash << bits | int(base_val)
             full_hash = full_hash + interim_hash
 
         if rem > 0:
             var interim_hash: UInt64 = 0
             for i in range(rem):
-                var base_val = bytes[i + 16*rounds] & mask
+                var base_val = bytes[i + 16 * rounds] & mask
                 interim_hash = interim_hash << bits | int(base_val)
             full_hash = full_hash + interim_hash
 
@@ -366,3 +394,19 @@ struct RecordCoord(Sized, Stringable, CollectionElement):
             + "..."
             + str(self.QuStr.end.value())
         )
+
+
+# fn main() raises:
+#     var record = FastqRecord(
+#         String("@HWI-ST180_0186:3:1:1484:1936#GGCTAC/1"),
+#         String(
+#             "NCTTGCCAAGACTGCGAAGGTGCAGTTCGCAAAGCGCGTACGCTGGCCACGTGTCCAAAACGTACGTTGGAGGGCGCCTTCGTCAACTCCGGAGCGAACG"
+#         ),
+#         String("+"),
+#         String(
+#             r"BPSSSTXUT[__acccccc\Y[[[][[[Y[_____ccc[c^^^^BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+#         ),
+#         String("sanger"),
+#     )
+
+#     print(record.validate_record())

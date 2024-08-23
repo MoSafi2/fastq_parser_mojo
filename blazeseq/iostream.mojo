@@ -1,476 +1,379 @@
-from memory.memory import memcpy
-from blazeseq.helpers import get_next_line_index, slice_tensor, cpy_tensor
-from blazeseq.CONSTS import (
-    simd_width,
-    U8,
-    DEFAULT_CAPACITY,
-    MAX_CAPACITY,
-    MAX_SHIFT,
-    carriage_return,
-)
+from blazeseq.CONSTS import DEFAULT_CAPACITY
 from pathlib import Path
-import time
-from tensor import Tensor
-from utils.static_tuple import InlineArray
+from buffer import Buffer
+from memory import memcpy, memset_zero
+from builtin.file import _OwnedStringRef
+from sys import external_call
+from blazeseq.helpers import find_chr_next_occurance
+from utils.span import Span
+from buffer import Buffer
+
+alias carriage_return = 13
+alias U8 = UInt8
+alias MAX_CAPACITY = 128 * 1024
+alias MAX_SHIFT = 30
 
 
-# Implement functionality from: Buffer-Reudx rust cate allowing for BufferedReader that supports partial reading and filling ,
-# https://github.com/dignifiedquire/buffer-redux
-# Minimial Implementation that support only line iterations
-
-# BUG in resizing buffer: One extra line & bad consumed and file coordinates.
-
-
-trait reader:
-    fn read_bytes(inout self, amt: Int) raises -> List[U8]:
-        ...
-
-    fn read_to_buffer(
-        inout self, inout buf: List[U8], buf_pos: Int, amt: Int
-    ) raises -> Int:
-        ...
-
-    fn __moveinit__(inout self, owned other: Self):
-        ...
-
-
-struct FileReader(reader):
-    var handle: FileHandle
-
-    fn __init__(inout self, path: Path) raises:
-        self.handle = open(path, "r")
-
-    @always_inline
-    fn read_bytes(inout self, amt: Int = -1) raises -> List[U8]:
-        return self.handle.read_bytes(amt)
-
-    # Does not work well currently
-    @always_inline
-    fn read_to_buffer(
-        inout self, inout buf: List[U8], buf_pos: Int, amt: Int
-    ) raises -> Int:
-        var out = self.read_bytes(amt)
-        if len(out) == 0:
-            return 0
-        cpy_tensor[U8](buf, out, len(out), buf_pos, 0)
-        return len(out)
-
-    fn __moveinit__(inout self, owned other: Self):
-        self.handle = other.handle^
-
-
-struct TensorReader(reader):
-    var pos: Int
-    var source: List[U8]
-
-    fn __init__(inout self, source: List[U8]):
-        self.source = source
-        self.pos = 0
-
-    @always_inline
-    fn read_bytes(inout self, amt: Int) raises -> List[U8]:
-        var ele = min(amt, len(self.source) - self.pos)
-
-        if ele == 0:
-            return List[U8](0)
-        var out = List[U8](ele)
-        cpy_tensor[U8](out, self.source, len(out)(), 0, self.pos)
-        self.pos += len(out)
-        return out
-
-    fn read_to_buffer(
-        inout self, inout buf: List[U8], buf_pos: Int, amt: Int
-    ) raises -> Int:
-        var ele = min(amt, len(self.source) - self.pos)
-        if ele == 0:
-            return 0
-        cpy_tensor[U8](buf, self.source, ele, buf_pos, self.pos)
-        self.pos += ele
-        return ele
-
-    fn __moveinit__(inout self, owned other: Self):
-        self.source = other.source^
-        self.pos = other.pos
-
-
-# BUG Last line is not returned if the file does not end with line end seperator
-# TODO: when in EOF Flush the buffer
-
-
-struct BufferedLineIterator[T: reader, check_ascii: Bool = False](
-    Sized, Stringable
-):
-    """A poor man's BufferedReader and LineIterator that takes as input a FileHandle or an in-memory Tensor and provides a buffered reader on-top with default capactiy.
-    """
-
-    var source: FileReader
-    var buf: List[U8]
+struct BufferedReader(Sized):
+    var buf: UnsafePointer[UInt8]
+    var source: FileHandle
     var head: Int
     var end: Int
-    var consumed: Int
+    var capacity: Int
+
+    ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
+    ###---------------------------------------------------------------  Dunder Methods  ----------------------------------------------------------------------------------------------------------------------------###
+    ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
 
     fn __init__(
         inout self, source: Path, capacity: Int = DEFAULT_CAPACITY
     ) raises:
         if source.exists():
-            self.source = FileReader(source)
+            self.source = open(source, "r")
         else:
             raise Error("Provided file not found for read")
-        self.buf = List[U8](capacity)
+
+        self.buf = UnsafePointer[UInt8]().alloc(capacity)
+
+        memset_zero(self.buf, capacity)
+
         self.head = 0
         self.end = 0
-        self.consumed = 0
-        _ = self._fill_buffer()
-        self.consumed = 0  # Hack to make the initial buffer full non-consuming
+        self.capacity = capacity
 
-    # fn __init__(
-    #     inout self, source: Tensor[U8], capacity: Int = DEFAULT_CAPACITY
-    # ) raises:
-    #     self.source = TensorReader(source)
-    #     self.buf = Tensor[U8](capacity)
-    #     self.head = 0
-    #     self.end = 0
-    #     self.consumed = 0
-    #     _ = self._fill_buffer()
-    #     self.consumed = 0  # Hack to make the initial buffer full non-consuming
-
-    # fn __init__(inout self, owned source: T, capacity: Int = DEFAULT_CAPACITY) raises:
-    #     self.source = source^
-    #     self.buf = Tensor[U8](capacity)
-    #     self.head = 0
-    #     self.end = 0
-    #     self.consumed = 0
-    #     _ = self._fill_buffer()
-    #     self.consumed = 0  # Hack to make the initial buffer full non-consuming
+        _ = self._fill_buffer_init()
 
     @always_inline
-    fn read_next_line(inout self) raises -> List[U8]:
-        var line_coord = self._line_coord()
-        return slice_tensor[U8](
-            self.buf, line_coord.start.value(), line_coord.end.value()
-        )
+    fn __getitem__(self, idx: Int) -> UInt8:
+        """Get a single  value at the given index."""
+        return self.buf.load(idx)
+
+    # From the mojo implementation for list,probably slow.
+    @always_inline
+    fn __getitem__(self, span: Slice) -> List[UInt8]:
+        """Gets the sequence of elements at the specified positions.
+
+        Args:
+            span: A slice that specifies positions of the new list.
+
+        Returns:
+            A new list containing the list at the specified span.
+        """
+
+        var start: Int
+        var end: Int
+        var step: Int
+
+        # Slice bound checking is done here
+        start, end, step = span.indices(len(self))
+        var r = range(start, end, step)
+
+        if not len(r):
+            return List[UInt8]()
+
+        var res = List[UInt8](capacity=len(r))
+        memcpy(res.unsafe_ptr(), self.buf + start, len(r))
+        res.size = len(r)
+        return res
+
+    # TODO: Add the slice version of this
+    @always_inline
+    fn __setitem__(self, idx: Int, value: UInt8):
+        """Set a single value at the given index."""
+        self.buf.store(idx, value)
+
+    ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
+    ###--------------------------------------------------------------  Private methods with no side effect----------------------------------------------------------------------------------------------------------###
+    ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
 
     @always_inline
-    fn read_next_coord(inout self) raises -> Slice:
-        var line_coord = self._line_coord()
-        return slice(
-            line_coord.start.value() + self.consumed,
-            line_coord.end.value() + self.consumed,
-        )
+    fn get_capacity(self) -> Int:
+        """Get the capacity of the buffer."""
+        return self.capacity
 
     @always_inline
-    fn read_n_coords[lines: Int](inout self) raises -> List[Slice]:
-        return self._read_n_line[lines]()
+    fn uninatialized_space(self) -> Int:
+        """Get the uninitialized space in the buffer."""
+        return self.get_capacity() - self.end
 
     @always_inline
-    fn _fill_buffer(inout self) raises -> Int:
-        """Returns the number of bytes read into the buffer."""
-        self._left_shift()
-        var nels = self.uninatialized_space()
-        var in_buf = self.source.read_bytes(nels)
-        if len(in_buf) == 0:
-            raise Error("EOF")
-
-        if len(in_buf)() < nels:
-            self._resize_buf(len(in_buf)() - nels, MAX_CAPACITY)
-
-        self._store[self.check_ascii](in_buf, len(in_buf)())
-        self.consumed += nels
-        return len(in_buf)()
+    fn len(self) -> Int:
+        """Get the length of the data in the buffer."""
+        return self.end - self.head
 
     @always_inline
-    fn _line_coord(inout self) raises -> Slice:
-        if self._check_buf_state():
-            _ = self._fill_buffer()
-
-        var coord: Slice
-        var line_start = self.head
-        var line_end = get_next_line_index(self.buf, self.head)
-
-        coord = Slice(line_start, line_end)
-
-        # Handle small buffers
-        if coord.end.value() == -1 and self.head == 0:
-            for i in range(MAX_SHIFT):
-                if coord.end.value() != -1:
-                    return self._handle_windows_sep(coord)
-                else:
-                    coord = self._line_coord_missing_line()
-
-        # Handle incomplete lines across two chunks
-        if coord.end.value() == -1:
-            _ = self._fill_buffer()
-            return self._handle_windows_sep(self._line_coord_incomplete_line())
-
-        self.head = line_end + 1
-
-        # Handling Windows-syle line seperator
-        if self.buf[line_end] == carriage_return:
-            line_end -= 1
-
-        return slice(line_start, line_end)
-
-    # TODO: Handle small Buffers, handle windows seperator, simplify
-    @always_inline
-    fn _read_n_line[lines: Int](inout self) raises -> List[Slice]:
-        var coords = List[Slice](Slice(-1, -1))
-        var internal_head = self.head
-
-        # TODO: Provide unrolling later using the @parameter for op
-        for i in range(lines):
-            if internal_head >= self.end:
-                internal_head -= self.head
-                # Resetting coordinates for read lines to the new buffer coordinates
-                for j in range(i):
-                    coords[j] = Slice(
-                        coords[j].start.value() - self.head,
-                        coords[j].end.value() - self.head,
-                    )
-                _ = self._fill_buffer()  # self.head is reset to 0
-
-            var coord: Slice
-            var line_start = internal_head
-            var line_end = get_next_line_index(self.buf, internal_head)
-
-            coord = Slice(line_start, line_end)
-
-            # Handle small buffers
-            if coord.end.value() == -1 and self.head == 0:
-                for i in range(MAX_SHIFT):
-                    if coord.end.value() != -1:
-                        coords[i] = self._handle_windows_sep(coord)
-                        continue
-                    else:
-                        coord = self._line_coord_missing_line(internal_head)
-
-            # Handle incomplete lines across two chunks
-            if coord.end.value() == -1:
-                # Restting corrdinates to new buffer
-                internal_head -= self.head
-                line_start = internal_head
-                for j in range(i):
-                    coords[j] = Slice(
-                        coords[j].start.value() - self.head,
-                        coords[j].end.value() - self.head,
-                    )
-                _ = self._fill_buffer()  # self.head is 0
-
-                # Try again to read the complete line
-                var completet_line = self._line_coord_incomplete_line(
-                    internal_head
-                )
-                coords[i] = completet_line
-                line_end = completet_line.end.value()
-
-            internal_head = line_end + 1
-
-            coords[i] = self._handle_windows_sep(slice(line_start, line_end))
-
-        self.head = internal_head
-        return coords
-
-    @always_inline
-    fn _line_coord_incomplete_line(inout self) raises -> Slice:
-        if self._check_buf_state():
-            _ = self._fill_buffer()
-        var line_start = self.head
-        var line_end = get_next_line_index(self.buf, self.head)
-        self.head = line_end + 1
-
-        if self.buf[line_end] == carriage_return:
-            line_end -= 1
-        return slice(line_start, line_end)
-
-    # Overload to allow reading missing line from a specific point
-    @always_inline
-    fn _line_coord_incomplete_line(inout self, pos: Int) raises -> Slice:
-        if self._check_buf_state():
-            _ = self._fill_buffer()
-        var line_start = pos
-        var line_end = get_next_line_index(self.buf, pos)
-        return slice(line_start, line_end)
-
-    @always_inline
-    fn _line_coord_missing_line(inout self) raises -> Slice:
-        self._resize_buf(self.capacity(), MAX_CAPACITY)
-        _ = self._fill_buffer()
-        var line_start = self.head
-        var line_end = get_next_line_index(self.buf, self.head)
-        self.head = line_end + 1
-
-        return slice(line_start, line_end)
-
-    @always_inline
-    fn _line_coord_missing_line(inout self, pos: Int) raises -> Slice:
-        self._resize_buf(self.capacity(), MAX_CAPACITY)
-        _ = self._fill_buffer()
-        var line_start = pos
-        var line_end = get_next_line_index(self.buf, pos)
-        return slice(line_start, line_end)
-
-    @always_inline
-    fn _store[
-        check_ascii: Bool = False
-    ](inout self, in_tensor: List[U8], amt: Int) raises:
-        @parameter
-        if check_ascii:
-            self._check_ascii(in_tensor)
-        cpy_tensor[U8](self.buf, in_tensor, amt, self.end, 0)
-        self.end += amt
-
-    @always_inline
-    fn _left_shift(inout self):
-        if self.head == 0:
-            return
-        var no_items = self.len()
-        cpy_tensor[U8](self.buf, self.buf, no_items, 0, self.head)
-        self.head = 0
-        self.end = no_items
+    fn __len__(self) -> Int:
+        """Alias for len."""
+        return self.len()
 
     @always_inline
     fn _check_buf_state(inout self) -> Bool:
+        """Check if the buffer is empty."""
         if self.head >= self.end:
-            self.head = 0
-            self.end = 0
             return True
         else:
             return False
 
+    ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
+    ###--------------------------------------------------------------  Private methods with side effect-------------------------------------------------------------------------------------------------------------###
+    ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
+
     @always_inline
-    fn _resize_buf(inout self, amt: Int, max_capacity: Int) raises:
-        if self.capacity() == max_capacity:
+    fn _reset_buffer(inout self):
+        """Reset the buffer head and end, in effect emptying the buffer."""
+        self.head = 0
+        self.end = 0
+
+    @always_inline
+    fn _fill_buffer_init(inout self) raises -> Int:
+        """Fill the buffer initially with data from the source. Avoids the overhead of left shifting.
+        """
+        var nels = self.uninatialized_space()
+        var nels_read = self.source.read(self.buf, nels)
+        if nels_read == 0:
+            raise Error("EOF")
+        self.end = int(nels_read)
+        return len(nels_read)
+
+    @always_inline
+    fn _left_shift(inout self):
+        """Shift the remaining elements of the buffer to the left to remove the consumed data.
+        """
+
+        if self.head == 0:
+            return
+        var no_items = self.end - self.head
+        memcpy(self.buf, self.buf + self.head, self.len())
+        self.head = 0
+        self.end = no_items
+
+    @always_inline
+    fn _fill_buffer(inout self) raises -> Int:
+        """Fill the buffer with data from the source. If the buffer is not empty, left shift the buffer to make space for new data.
+        returns: the new length of the buffer.
+        """
+
+        if self._check_buf_state():
+            self._reset_buffer()
+        else:
+            self._left_shift()
+
+        var nels = self.uninatialized_space()
+        var nels_read = self.source.read(self.buf + self.end, nels)
+        if nels_read == 0:
+            raise Error("EOF")
+        self.end += int(nels_read)
+
+        return self.len()
+
+    @always_inline
+    fn _resize_buf(inout self, amt: Int, max_capacity: Int) raises -> None:
+        """Resize the buffer to accommodate more data. If the new capacity exceeds the max capacity, the buffer is resized to the max capacity.
+        """
+
+        if self.get_capacity() == max_capacity:
             raise Error("Buffer is at max capacity")
 
         var nels: Int
-        if self.capacity() + amt > max_capacity:
+        if self.get_capacity() + amt > max_capacity:
             nels = max_capacity
         else:
-            nels = self.capacity() + amt
-        var x = List[U8](nels)
-        var nels_to_copy = min(self.capacity(), self.capacity() + amt)
-        cpy_tensor[U8](x, self.buf, nels_to_copy, 0, 0)
-        self.buf = x
+            nels = self.get_capacity() + amt
+
+        var new_buf = UnsafePointer[UInt8]().alloc(nels)
+
+        var nels_to_copy = min(self.get_capacity(), self.get_capacity() + amt)
+        memcpy(new_buf, self.buf, nels_to_copy)
+
+        self.buf = new_buf
+        self.capacity = nels
+
+    fn _skip_delim(inout self) raises:
+        """Skips one byte of the buffer."""
+        self.head += 1
+
+        if self._check_buf_state():
+            self._reset_buffer()
+            _ = self._fill_buffer()
+
+    ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
+    ###--------------------------------------------------------------  Public methods with side effect--------------------------------------------------------------------------------------------------------------###
+    ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
 
     @always_inline
-    @staticmethod
-    fn _check_ascii(in_tensor: List[U8]) raises:
-        var aligned = math.align_down(len(in_tensor)(), simd_width)
-        # alias bit_mask = 0xA0  # Between 32 and 127, makes a problems with 10
-        alias bit_mask = 0x80  # Non negative
-        for i in range(0, aligned, simd_width):
-            var vec = in_tensor.load[width=simd_width](i)
-            var mask = vec & bit_mask
-            for i in range(len(mask)):
-                if mask[i] != 0:
-                    raise Error("Non ASCII letters found")
+    fn read(inout self, n: Int) raises -> List[UInt8]:
+        """Read n bytes from the buffer."""
 
-        for i in range(aligned, len(in_tensor)()):
-            if in_tensor[i] & bit_mask != 0:
-                raise Error("Non ASCII letters found")
+        if self._check_buf_state():
+            self._reset_buffer()
+            _ = self._fill_buffer()
+
+        var nels = n
+        var data = List[UInt8](capacity=nels)
+        data.size = min(nels, self.len())
+        memcpy(data.unsafe_ptr(), self.buf + self.head, nels)
+        self.head += nels
+        return data
 
     @always_inline
-    fn _handle_windows_sep(self, in_slice: Slice) -> Slice:
-        if self.buf[in_slice.end.value()] != carriage_return:
-            return in_slice
-        return Slice(in_slice.start.value(), in_slice.end.value() - 1)
+    fn read_span(
+        inout self, n: Int
+    ) raises -> Span[is_mutable=False, T=UInt8, lifetime = __lifetime_of(self)]:
+        """Read n bytes from the buffer."""
+        if self._check_buf_state():
+            self._reset_buffer()
+            _ = self._fill_buffer()
 
-    ########################## Helpers functions, have no side effects #######################
+        var nels = min(n, self.len())
+        var data = Span[
+            is_mutable=False, T=UInt8, lifetime = __lifetime_of(self)
+        ](unsafe_ptr=self.buf + self.head, len=nels)
+        self.head += nels
+        return data
+
+    fn read_buffer(inout self, n: Int) raises -> Buffer[DType.uint8]:
+        """Read n bytes from the buffer."""
+        if self._check_buf_state():
+            self._reset_buffer()
+            _ = self._fill_buffer()
+
+        var nels = n
+        var data = Buffer[DType.uint8](self.buf + self.head, nels)
+        self.head += nels
+        return data
 
     @always_inline
-    fn map_pos_2_buf(self, file_pos: Int) -> Int:
-        return file_pos - self.consumed
+    fn robust_read(inout self, n: Int) raises -> List[UInt8]:
+        """Read n bytes from the buffer, if the number of bytes requested is greater than the buffer size, the buffer is resized to accommodate the new data.
+        """
+
+        if n > self.get_capacity():
+            self._resize_buf(n, max(self.capacity, n - self.capacity))
+            _ = self._fill_buffer()
+
+        var nels = min(n, self.len())
+        var data = List[UInt8](capacity=nels)
+        data.size = nels
+        memcpy(data.unsafe_ptr(), self.buf + self.head, nels)
+        self.head += nels
+        return data
 
     @always_inline
-    fn len(self) -> Int:
-        return self.end - self.head
+    fn robust_read_span(
+        inout self, n: Int
+    ) raises -> Span[is_mutable=False, T=UInt8, lifetime = __lifetime_of(self)]:
+        """Read n bytes from the buffer, if the number of bytes requested is greater than the buffer size, the buffer is resized to accommodate the new data.
+        """
+        if n > self.get_capacity():
+            self._resize_buf(n, max(self.capacity, n - self.capacity))
+            _ = self._fill_buffer()
 
-    @always_inline
-    fn capacity(self) -> Int:
-        return len(self.buf)
+        var nels = min(n, self.len())
+        var data = Span[
+            is_mutable=False, T=UInt8, lifetime = __lifetime_of(self)
+        ](unsafe_ptr=self.buf + self.head, len=nels)
+        self.head += nels
+        return data
 
-    @always_inline
-    fn uninatialized_space(self) -> Int:
-        return self.capacity() - self.end
+    ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
+    ###-------------------------------------------------------------------------  BufferedLineIterator--------------------------------------------------------------------------------------------------------------###
+    ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
 
-    @always_inline
-    fn usable_space(self) -> Int:
-        return self.uninatialized_space() + self.head
+
+struct BufferedLineIterator:
+    var inner: BufferedReader
+
+    fn __init__(
+        inout self, source: Path, capacity: Int = DEFAULT_CAPACITY
+    ) raises:
+        self.inner = BufferedReader(source, capacity)
 
     @always_inline
     fn __len__(self) -> Int:
-        return self.end - self.head
+        return len(self.inner)
 
     @always_inline
-    fn __str__(self) -> String:
-        var out = List[U8](self.len())
-        cpy_tensor[U8](out, self.buf, self.len(), 0, self.head)
-        return String(out._steal_ptr().bitcast[DType.uint8](), self.len())
+    fn __getitem__(self, idx: Int) -> UInt8:
+        return self.inner[idx]
 
-    fn __getitem__(self, index: Int) raises -> U8:
-        if self.head <= index <= self.end:
-            return self.buf[index]
-        else:
-            raise Error("Out of bounds")
+    @always_inline
+    fn __getitem__(self, span: Slice) -> List[UInt8]:
+        return self.inner[span]
 
-    fn __getitem__(self, slice: Slice) raises -> List[U8]:
-        if slice.start.value() >= self.head and slice.end.value() <= self.end:
-            var out = List[U8](slice.end.value() - slice.start.value())
-            cpy_tensor[U8](
-                out,
-                self.buf,
-                slice.end.value() - slice.start.value(),
-                0,
-                slice.start.value(),
+    @always_inline
+    fn __setitem__(self, idx: Int, value: UInt8):
+        self.inner[idx] = value
+
+    # TODO: Handle small buffers as well
+    @always_inline
+    fn read_line(inout self) raises -> List[UInt8]:
+        var idx = find_chr_next_occurance(
+            self.inner.buf, self.inner.len(), self.inner.head
+        )
+
+        # Handles broken lines across two chunks
+        if idx == -1:
+            _ = self.inner._fill_buffer()
+            idx = find_chr_next_occurance(
+                self.inner.buf, self.inner.len(), self.inner.head
             )
-            return out
-        else:
-            raise Error("Out of bounds")
+
+        var res = self.inner.read(idx - self.inner.head)
+        self.inner._skip_delim()
+        return res
+
+    @always_inline
+    fn read_line_span(
+        inout self,
+    ) raises -> Span[is_mutable=False, T=UInt8, lifetime = __lifetime_of(self)]:
+        var idx = find_chr_next_occurance(
+            self.inner.buf, self.inner.len(), self.inner.head
+        )
+
+        # Handles broken lines across two chunks
+        if idx == -1:
+            _ = self.inner._fill_buffer()
+            idx = find_chr_next_occurance(
+                self.inner.buf, self.inner.len(), self.inner.head
+            )
+
+        var res = self.inner.read_span(idx - self.inner.head)
+        self.inner._skip_delim()
+        return res
+
+    ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
+    ###-------------------------------------------------------------------------  read_line_diff_impl --------------------------------------------------------------------------------------------------------------###
+    ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
 
 
-# TODO: Add a resize if the buffer is too small
-struct BufferedWriter:
-    var sink: FileHandle
-    var buf: List[U8]
-    var cursor: Int
-    var written: Int
+# fn main() raises:
+#     from pathlib import Path
 
-    fn __init__(inout self, out_path: String, buf_size: Int) raises:
-        self.sink = open(out_path, "w")
-        self.buf = List[U8](buf_size)
-        self.cursor = 0
-        self.written = 0
+#     var b = BufferedLineIterator(
+#         Path(
+#             "/home/mmabrouk/Documents/Projects/BlazeSeq/data/M_abscessus_HiSeq.fq"
+#         ),
+#         64 * 1024,
+#     )
+#     var n = 0
+#     while True:
+#         try:
+#             var x = b.read_line()
+#             n += 1
 
-    fn ingest(inout self, source: List[U8]) raises -> Bool:
-        if len(source)() > self.uninatialized_space():
-            self.flush_buffer()
-        cpy_tensor[U8](self.buf, source, len(source)(), self.cursor, 0)
-        self.cursor += len(source)()
-        return True
+#         except Error:
+#             print(Error._message())
+#             break
 
-    fn flush_buffer(inout self) raises:
-        var out = List[U8](self.cursor)
-        cpy_tensor[U8](out, self.buf, self.cursor, 0, 0)
-        var out_string = StringRef(out._steal_ptr(), self.cursor)
-        self.sink.write(out_string)
-        self.written += self.cursor
-        self.cursor = 0
+    # while True:
+    #     try:
+    #         var x = b.read_line()
+    #         n += 1
+    #         x.append(0)
+    #         # print(String(x), b.inner.head, b.inner.end)
 
-    fn _resize_buf(inout self, amt: Int, max_capacity: Int = MAX_CAPACITY):
-        var new_capacity = 0
-        if len(self.buf) + amt > max_capacity:
-            new_capacity = max_capacity
-        else:
-            new_capacity = len(self.buf) + amt
-        var new_tensor = List[U8](new_capacity)
-        cpy_tensor[U8](new_tensor, self.buf, self.cursor, 0, 0)
-        swap(self.buf, new_tensor)
+    #     except Error:
+    #         print(Error._message())
+    #         break
 
-    fn uninatialized_space(self) -> Int:
-        return self.capacity() - self.cursor
-
-    fn capacity(self) -> Int:
-        return len(self.buf)
-
-    fn close(inout self) raises:
-        self.flush_buffer()
-        self.sink.close()
+    # print(n / 4)
