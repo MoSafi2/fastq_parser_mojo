@@ -1,4 +1,4 @@
-from blazeseq.record import FastqRecord, RecordCoord
+from blazeseq.fastq import FastqRecord, RecordCoord
 from blazeseq.CONSTS import *
 from blazeseq.helpers import _parse_schema
 from blazeseq.iostream import BufferedLineIterator
@@ -92,18 +92,3 @@ struct CoordParser:
         var line4 = self.stream.read_line_span()
         return RecordCoord(line1, line2, line3, line4)
 
-
-fn main() raises:
-    var n = 0
-    var parser = RecordParser("data/M_abscessus_HiSeq.fq")
-
-    var start = time.now()
-    while True:
-        try:
-            var record = parser.next()
-            n += 1
-        except Error:
-            print(n)
-            break
-    var end = time.now()
-    print("Time taken: ", (end - start) / 1e9)
