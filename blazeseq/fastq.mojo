@@ -1,9 +1,10 @@
 from blazeseq.CONSTS import *
 from blazeseq.iostream import BufferedLineIterator
 from utils.variant import Variant
-from utils import Span
+from utils import Span, StringRef
 from math import align_down, remainder
 from blazeseq.helpers import _validate_ascii
+from memory import UnsafePointer
 
 alias LU8 = List[UInt8]
 alias schema = Variant[String, QualitySchema]

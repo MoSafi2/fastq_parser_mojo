@@ -1,4 +1,5 @@
 from math import align_down
+from memory import UnsafePointer
 from sys.info import sizeof
 from blazeseq.CONSTS import (
     sanger_schema,

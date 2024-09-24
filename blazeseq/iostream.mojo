@@ -1,12 +1,14 @@
 from blazeseq.CONSTS import DEFAULT_CAPACITY
 from pathlib import Path
 from buffer import Buffer
-from memory import memcpy, memset_zero
+from memory import memcpy, memset_zero, UnsafePointer
 from builtin.file import _OwnedStringRef
 from sys import external_call
 from blazeseq.helpers import find_chr_next_occurance
 from utils.span import Span
 from buffer import Buffer
+from utils.stringref import StringRef
+
 
 alias carriage_return = 13
 alias U8 = UInt8
@@ -255,7 +257,7 @@ struct BufferedReader(Sized):
     @always_inline
     fn robust_read_span(
         inout self, n: Int
-    ) raises -> Span[is_mutable=False, T=UInt8, lifetime = __lifetime_of(self)]:
+    ) raises -> Span[T=UInt8, lifetime = __lifetime_of(self)]:
         """Read n bytes from the buffer, if the number of bytes requested is greater than the buffer size, the buffer is resized to accommodate the new data.
         """
         if n > self.get_capacity():
@@ -263,9 +265,9 @@ struct BufferedReader(Sized):
             _ = self._fill_buffer()
 
         var nels = min(n, self.len())
-        var data = Span[
-            is_mutable=False, T=UInt8, lifetime = __lifetime_of(self)
-        ](unsafe_ptr=self.buf + self.head, len=nels)
+        var data = Span[T=UInt8, lifetime = __lifetime_of(self)](
+            unsafe_ptr=self.buf + self.head, len=nels
+        )
         self.head += nels
         return data
 
