@@ -91,4 +91,3 @@ struct CoordParser:
             raise Error("Quality Header is corrupt")
         var line4 = self.stream.read_line_span()
         return RecordCoord(line1, line2, line3, line4)
-

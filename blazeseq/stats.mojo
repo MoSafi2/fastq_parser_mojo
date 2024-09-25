@@ -1,6 +1,6 @@
 """This module should hold aggregate statistics about all the record which have been queried by the Parser, regardless of the caller function. """
 
-from blazeseq.record import FastqRecord
+from blazeseq.fastq import FastqRecord
 from collections import Dict, KeyElement
 import time
 from tensor import Tensor, TensorShape
