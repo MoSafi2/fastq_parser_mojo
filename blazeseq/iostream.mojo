@@ -8,15 +8,30 @@ from blazeseq.helpers import find_chr_next_occurance
 from utils.span import Span
 from buffer import Buffer
 from utils.stringref import StringRef
+from utils.string_slice import StringSlice
+import time
 
 
 alias carriage_return = 13
 alias U8 = UInt8
-alias MAX_CAPACITY = 128 * 1024
 alias MAX_SHIFT = 30
 
 
-struct BufferedReader(Sized):
+trait Reader(Sized):
+
+    fn read(inout self, n: Int) raises -> List[UInt8]:
+        ...
+    
+    fn __init__(out self, source: Path, capacity: Int) raises:
+        ...
+
+    fn __getitem__(self, idx: Int) -> UInt8:
+        ...
+
+
+struct BufferedReader(Sized, Reader):
+    """A buffered reader that reads data from a file in chunks and stores it in a buffer for efficient reading.
+    """
     var buf: UnsafePointer[UInt8]
     var source: FileHandle
     var head: Int
@@ -28,8 +43,17 @@ struct BufferedReader(Sized):
     ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
 
     fn __init__(
-        inout self, source: Path, capacity: Int = DEFAULT_CAPACITY
+        out self, source: Path, capacity: Int = DEFAULT_CAPACITY
     ) raises:
+        """Initialize the buffer with the provided source file and capacity.
+
+        Args:
+            source: The file to read from.
+            capacity: The initial capacity of the buffer.
+
+        Raises:
+            Error: If the file is not found.        
+        """
         if source.exists():
             self.source = open(source, "r")
         else:
@@ -83,7 +107,7 @@ struct BufferedReader(Sized):
         self.buf.store(idx, value)
 
     ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
-    ###--------------------------------------------------------------  Private methods with no side effect----------------------------------------------------------------------------------------------------------###
+    ###----------------------------------------------------------------------- methods with no side effect----------------------------------------------------------------------------------------------------------###
     ###-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------###
 
     @always_inline
@@ -133,7 +157,7 @@ struct BufferedReader(Sized):
         if nels_read == 0:
             raise Error("EOF")
         self.end = int(nels_read)
-        return len(nels_read)
+        return int(nels_read)
 
     @always_inline
     fn _left_shift(inout self):
@@ -169,6 +193,7 @@ struct BufferedReader(Sized):
     @always_inline
     fn _resize_buf(inout self, amt: Int, max_capacity: Int) raises -> None:
         """Resize the buffer to accommodate more data. If the new capacity exceeds the max capacity, the buffer is resized to the max capacity.
+        Subsquent expansion beyond max_capacity raises an error.
         """
 
         if self.get_capacity() == max_capacity:
@@ -227,14 +252,15 @@ struct BufferedReader(Sized):
         self.head += nels
         return data
 
-    fn read_buffer(inout self, n: Int) raises -> Buffer[DType.uint8]:
+
+    fn read_string_slice(inout self, n: Int) raises -> StringSlice[origin = __origin_of(self)]:
         """Read n bytes from the buffer."""
         if self._check_buf_state():
             self._reset_buffer()
             _ = self._fill_buffer()
 
-        var nels = n
-        var data = Buffer[DType.uint8](self.buf + self.head, nels)
+        var nels = min(n, self.len())
+        var data = StringSlice[__origin_of(self)](ptr = self.buf + self.head, length = nels)
         self.head += nels
         return data
 
@@ -257,7 +283,7 @@ struct BufferedReader(Sized):
     @always_inline
     fn robust_read_span(
         inout self, n: Int
-    ) raises -> Span[T=UInt8, lifetime = __lifetime_of(self)]:
+    ) raises -> Span[T=UInt8, origin = __origin_of(self)]:
         """Read n bytes from the buffer, if the number of bytes requested is greater than the buffer size, the buffer is resized to accommodate the new data.
         """
         if n > self.get_capacity():
@@ -265,8 +291,8 @@ struct BufferedReader(Sized):
             _ = self._fill_buffer()
 
         var nels = min(n, self.len())
-        var data = Span[T=UInt8, lifetime = __lifetime_of(self)](
-            unsafe_ptr=self.buf + self.head, len=nels
+        var data = Span[T=UInt8, origin = __origin_of(self)](
+            ptr=self.buf + self.head, length=nels
         )
         self.head += nels
         return data
@@ -332,3 +358,45 @@ struct BufferedLineIterator:
         var res = self.inner.read_span(idx - self.inner.head)
         self.inner._skip_delim()
         return res
+
+    @always_inline
+    fn read_line_slice(inout self) raises -> StringSlice[origin = __origin_of(self.inner)]:
+        var idx = find_chr_next_occurance(
+            self.inner.buf, self.inner.len(), self.inner.head
+        )
+
+        if idx == -1:
+            _ = self.inner._fill_buffer()
+            idx = find_chr_next_occurance(
+                self.inner.buf, self.inner.len(), self.inner.head
+            )
+
+        var res = self.inner.read_string_slice(idx - self.inner.head)
+        self.inner._skip_delim()
+        return res
+
+    
+
+fn main() raises:
+    var path = Path("data/M_abscessus_HiSeq.fq")
+    var reader = BufferedLineIterator(path)
+
+    var n = 0
+    t1 = time.now()
+    while True:
+        try:
+            var line = reader.read_line_span()
+            n += 1
+            if len(line) == 0:
+                print(n)
+                print("EOF")
+                break
+        except Error:
+            print("EOF")
+            print(n)
+            break
+    t2 = time.now()
+    print("Time taken:", (t2 - t1) / 1e6)
+
+
+
