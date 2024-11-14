@@ -1,9 +1,8 @@
 from memory import memcpy, UnsafePointer
 from utils import StringRef
-from blazeseq.helpers import get_next_line_index, slice_tensor, cpy_tensor
+from blazeseq.helpers_new import get_next_line_index, slice_tensor, cpy_tensor
 from blazeseq.CONSTS import (
     simd_width,
-    U8,
     DEFAULT_CAPACITY,
     MAX_CAPACITY,
     MAX_SHIFT,
@@ -13,6 +12,8 @@ from pathlib import Path
 import time
 from tensor import Tensor
 import math
+
+alias U8 = DType.uint8
 
 
 # Implement functionality from: Buffer-Reudx rust cate allowing for BufferedReader that supports partial reading and filling ,
