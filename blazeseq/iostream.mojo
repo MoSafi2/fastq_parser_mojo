@@ -1,6 +1,11 @@
 from memory import memcpy, UnsafePointer, Span
 from utils import StringSlice
-from blazeseq.helpers import get_next_line_index, slice_tensor, cpy_tensor
+from blazeseq.helpers import (
+    get_next_line_index,
+    slice_tensor,
+    cpy_tensor,
+    get_next_line,
+)
 from blazeseq.CONSTS import (
     simd_width,
     U8,
@@ -276,9 +281,16 @@ struct BufferedLineIterator[T: reader, check_ascii: Bool = False](
         if self._check_buf_state():
             _ = self._fill_buffer()
         var line_start = self.head
-        var line_end = get_next_line_index(self.buf, self.head)
-        self.head = line_end + 1
 
+        var line_end = get_next_line_index(self.buf, self.head)
+
+        # s = Span[origin = __origin_of(self.buf)](
+        #     ptr=self.buf.unsafe_ptr(), length=self.buf.num_elements()
+        # )
+        # line_end = get_next_line(s, self.head)
+
+
+        self.head = line_end + 1
         if self.buf[line_end] == carriage_return:
             line_end -= 1
         return slice(line_start, line_end)
